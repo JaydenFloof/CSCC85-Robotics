@@ -396,6 +396,61 @@ bool Update_Angle(void) {
   return true;
 }
 
+/* Rotates and fires the thruster `thruster` in the direction `dir`. */
+void Rotate_and_Fire(Thruster thruster, Direction dir) {
+  double pwr = (dir == DIR_UP || dir == DIR_DOWN) 
+               ? 1.0 
+               : 0.5;
+
+  double th_offset = 0.0;
+  if (thruster == THR_LEFT) {
+    th_offset = 90.0;
+  } else if (thruster == THR_RIGHT) {
+    th_offset = -90.0;
+  }
+
+  double target_angle = 0.0;
+  if (dir == DIR_LEFT) {
+    target_angle = (thruster != THR_LEFT && thruster != THR_RIGHT) 
+                 ? 315.0
+                 : 300.0;
+  } else if (dir == DIR_RIGHT) {
+    target_angle = (thruster != THR_LEFT && thruster != THR_RIGHT)
+                 ? 45.0
+                 : 60.0;
+  }
+
+  double curr_angle = fmod(sensor.TH + th_offset + 360, 360);
+  if (dir != DIR_DOWN && fabs(curr_angle - target_angle) <= 0.5) {
+    switch (thruster) {
+      case THR_MAIN: 
+        Main_Thruster(pwr);
+        power.MAIN = pwr;
+        break;
+      case THR_LEFT: 
+        Left_Thruster(pwr);
+        power.LEFT = pwr;
+        break;
+      case THR_RIGHT: 
+        Right_Thruster(pwr);
+        power.RIGHT = pwr;
+        break;
+    }
+  } else {
+    /* Disable ALL thrusters. */
+    Main_Thruster(0);
+    Left_Thruster(0);
+    Right_Thruster(0);
+    power.MAIN = 0;
+    power.LEFT = 0;
+    power.RIGHT = 0;
+
+    double shortest_rot = fmod(target_angle - curr_angle + 540.0, 360.0) - 180.0;
+    Rotate(shortest_rot);
+    power.ROT = shortest_rot;
+  }
+}
+
 void Lander_Control(void)
 {
  /*
