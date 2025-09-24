@@ -451,6 +451,84 @@ void Rotate_and_Fire(Thruster thruster, Direction dir) {
   }
 }
 
+/* 
+Controls available thrusters to reach the target horizontal and vertical velocities 
+`VX_target`, `VY_target`, respectively. 
+
+If `upright` is true, all thrusters will be disabled.
+*/
+void Thruster_Control(double VX_target, double VY_target, bool upright) {
+  if (upright) {
+    /* Disable ALL thrusters. */
+    Main_Thruster(0); 
+    Left_Thruster(0); 
+    Right_Thruster(0);
+    power.MAIN = 0; 
+    power.LEFT = 0; 
+    power.RIGHT = 0;
+
+    double shortest_rot = fmod(540.0 - sensor.TH, 360.0) - 180.0;
+    Rotate(shortest_rot);
+    power.ROT = shortest_rot;
+
+    return;
+  }
+
+  /* Choose an available thruster. */
+  Thruster thruster;
+  if (MT_OK && LT_OK && RT_OK) {  // Special state: Use all working thrusters!
+    thruster = THR_DEF;
+  } else if (MT_OK) {
+    thruster = THR_MAIN;
+  } else if (LT_OK) {
+    thruster = THR_LEFT;
+  } else {
+    thruster = THR_RIGHT;
+  }
+
+  /* All thruster mode. */
+  if (thruster == THR_DEF) {
+    if (sensor.VX - VX_target > 0.0) {
+      Left_Thruster(0);
+      Right_Thruster(0.5); 
+      power.LEFT = 0; 
+      power.RIGHT = 0.5;
+    } else {
+      Left_Thruster(0.5); 
+      Right_Thruster(0); 
+      power.LEFT = 0.5; 
+      power.RIGHT = 0;
+    }
+
+    if (sensor.VY - VY_target < 0.0) {
+      Main_Thruster(1.0); 
+      power.MAIN = 1.0;
+    } else {
+      Main_Thruster(0.0);
+      power.MAIN = 0.0;
+    }
+  } else { /* Single thruster mode. */
+    double VX_diff = VX_target - sensor.VX;
+    double VY_diff = VY_target - sensor.VY;
+
+    Direction dir;
+    if (VX_diff >= 1) {
+      dir = DIR_RIGHT;
+    }
+    else if (VX_diff <= -0.5) {
+      dir = DIR_LEFT;
+    }
+    else if (VY_diff >= 0.5) {
+      dir = DIR_UP;
+    }
+    else {
+      dir = DIR_DOWN;
+    }
+
+    Rotate_and_Fire(thruster, dir);
+  }
+}
+
 void Lander_Control(void)
 {
  /*
