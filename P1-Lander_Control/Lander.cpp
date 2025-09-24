@@ -245,6 +245,157 @@ typedef enum {
   DIR_UP      // Up direction.
 } Direction;
 
+/* 
+Updates the sensor's value and status `value` and `status`, respectively. 
+Takes multiple samples of a given sensor using its corresponding sensor function `sensor_func`.
+*/
+bool Update_Sensor(double *value, double (*sensor_func)(void), bool *status) {
+  if (*status == false) {
+    return false;
+  }
+  
+  /* Get sensor samples. */
+  double sensor_samples[SAMPLE_AMT];
+  double sample_sum = 0;
+  double sample_max = -1;
+  for (size_t i = 0; i < SAMPLE_AMT; i++) {
+    sensor_samples[i] = sensor_func();
+    sample_sum += sensor_samples[i];
+    if (fabs(sensor_samples[i]) > sample_max) {
+      sample_max = fabs(sensor_samples[i]);
+    }
+  }
+  
+  /* Compute mean and variance across sensor readings. */
+  double sensor_mean = sample_sum / SAMPLE_AMT;
+  double sensor_var = 0;
+  for (size_t i = 0; i < SAMPLE_AMT; i++) {
+    sensor_var += pow((sensor_samples[i] - sensor_mean), 2) / pow(sample_max + 2, 2);
+  }
+  sensor_var = sensor_var / SAMPLE_AMT;
+  
+  /* If the sensor varies too much, consider it faulty. */
+  if (sensor_var >= VAR_MAX) {
+    *status = false;
+    return false;
+  }
+
+  *value = sensor_mean;
+  return true;
+}
+
+/* Computes all sensor data. */
+void Compute_Sensor_Data(void) {
+  double y_new = sensor.Y;
+
+  /* Predict the next sensor data. */
+  struct SensorData sensor_pred = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+  if (SIM_TICKS > 0) {
+    /* Translational acceleration. */
+    double X_Acc = MAIN_ACC * sin(sensor.TH) + LR_ACC_DIFF * cos(sensor.TH);
+    double Y_Acc = (G_ACCEL - MAIN_ACC * cos(sensor.TH)) + LR_ACC_DIFF * sin(sensor.TH);
+
+    /* Displacements. */
+    double DX = sensor.VX * VEL_TIMESTEP + (X_Acc * pow(ACC_TIMESTEP, 2)) / 2;
+    double DY = sensor.VY * VEL_TIMESTEP + (Y_Acc * pow(ACC_TIMESTEP, 2)) / 2;
+
+    /* Predictions. */
+    sensor_pred = {
+      .X  = sensor.X + DX,
+      .Y  = sensor.Y - DY,
+      .VX = sensor.VX + X_Acc * ACC_TIMESTEP,
+      .VY = sensor.VY - Y_Acc * ACC_TIMESTEP,
+      .TH = sensor.TH + fmax(-ROT_MAX, fmin(power.ROT, ROT_MAX))
+    };
+  }
+
+  /***********************/
+  /* Update ALL sensors. */
+  /***********************/
+
+  if (!Update_Sensor(&sensor.X, &Position_X, &status.X_OK)) {
+    if (status.VX_OK) {
+      sensor.X += sensor.VX * VEL_TIMESTEP;
+    } else {
+      sensor.X = sensor_pred.X;
+    }
+  }
+
+  if (!Update_Sensor(&sensor.Y, &Position_Y, &status.Y_OK)) {
+    if (status.VY_OK) {
+      sensor.Y -= sensor.VY * VEL_TIMESTEP;
+    } else {
+      sensor.Y = sensor_pred.Y;
+    }
+  }
+
+  x_hist.buf[x_hist.idx] = sensor.X;
+  x_hist.idx = (x_hist.idx + 1) % HIST_BUFSIZE;
+  if (x_hist.size < HIST_BUFSIZE) {
+    x_hist.size++;
+  }
+
+  if (!Update_Sensor(&sensor.VX, &Velocity_X, &status.VX_OK) && status.X_OK) {
+    if (x_hist.size > 0) {
+      int oldest_index = (x_hist.idx - x_hist.size + HIST_BUFSIZE) % HIST_BUFSIZE;
+      double oldest_X = x_hist.buf[oldest_index];
+      sensor.VX = (sensor.X - oldest_X) / (VEL_TIMESTEP * x_hist.size);
+    }
+  }
+
+  if (!Update_Sensor(&sensor.VY, &Velocity_Y, &status.VY_OK)) {
+    if (status.Y_OK) {
+      sensor.VY =  (y_new - sensor.Y) / VEL_TIMESTEP;
+    } else {
+      sensor.VY = sensor_pred.VY;
+    }
+  }
+
+  if (!Update_Angle()) {
+    sensor.TH = sensor_pred.TH;
+  }
+}
+
+/* Updates the angular sensor's value and status. */
+bool Update_Angle(void) {
+  if (!status.TH_OK) {
+    return false;
+  }
+
+  /* Get sensor samples. */
+  double angle_samples[SAMPLE_AMT];
+  double sin_sum = 0.0;
+  double cos_sum = 0.0;
+  double angle_max = -361.0;  // Placeholder, will get overwritten later.
+  double angle_min = 361.0;   // Placeholder, will get overwritten later.
+  for (size_t i = 0; i < SAMPLE_AMT; i++) {
+    double angle_deg = Angle();
+    angle_samples[i] = angle_deg;
+
+    double rad = angle_deg * M_PI / 180.0;
+    sin_sum += sin(rad);
+    cos_sum += cos(rad);
+
+    if (angle_deg > angle_max) {
+      angle_max = angle_deg;
+    }
+    if (angle_deg < angle_min) {
+      angle_min = angle_deg;
+    }
+  }
+
+  /* If the sensor varies too much, consider it faulty. */
+  if (angle_max - angle_min > TH_MAX) {
+    status.TH_OK = false;
+    return false;
+  }
+
+  double mean_deg = fmod((atan2(sin_sum, cos_sum) * 180.0 / M_PI) + 360.0, 360.0);
+  sensor.TH = mean_deg;
+
+  return true;
+}
+
 void Lander_Control(void)
 {
  /*
