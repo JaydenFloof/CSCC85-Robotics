@@ -162,6 +162,89 @@
 
 #include "Lander_Control.h"
 
+/* Timesteps. */
+#define VEL_TIMESTEP 0.025                // Velocity timestep.
+#define ACC_TIMESTEP (VEL_TIMESTEP / 10)  // Acceleration timestep.
+
+/* Thresholds. */
+#define VAR_MAX 0.05                      // Maximum variation in a signal.
+#define ROT_MAX (MAX_ROT_RATE * 180 / PI) // Maximum rotation (in radians).
+#define TH_MAX  3.5                       // Maximum difference in angle.
+
+/* Angles. */
+#define TURN_TH (45.0 * PI / 180) // Angle to maintain when a side thruster is working.
+
+/* Acceleration. */
+#define MAIN_ACC (MT_ACCEL * power.MAIN)                                  // Main thruster acceleration.
+#define LR_ACC_DIFF ((LT_ACCEL * power.LEFT) - (RT_ACCEL * power.RIGHT))  // Difference between left and right thruster acceleration.
+
+/* Sampling constants. */
+#define SAMPLE_AMT 100000 // Amount of sensor samples to take.
+#define HIST_BUFSIZE 10   // History buffer size.
+
+/* Simulation state variables. */
+double SIM_TICKS = 0; // Elapsed simulation ticks.
+
+/* History buffers. */
+struct HistoryBuffer {
+  double buf[HIST_BUFSIZE]; // Buffer.
+  size_t idx;               // Index of the most recent element.
+  size_t size;              // Number of entries in the buffer.
+} x_hist = { {0}, 0, 0 };
+
+/* Status flags. */
+struct StatusFlags {
+  bool X_OK;  // True, if the horizontal position sensor is working.
+  bool Y_OK;  // True, if the vertical position sensor is working.
+  bool VX_OK; // True, if the horizontal velocity sensor is working.
+  bool VY_OK; // True, if the vertical velocity sensor is working.
+  bool TH_OK; // True, if the angular sensor is working.
+} status = { true, true, true, true, true };
+
+/* Thruster powers. */
+struct ThrusterPower {
+  double MAIN;  // Main thruster power.
+  double LEFT;  // Left thruster power.
+  double RIGHT; // Right thruster power.
+  double ROT;   // Rotation power.
+} power = { 0.0, 0.0, 0.0, 0.0 };
+
+/* Sensor data. */
+struct SensorData {
+  double X;   // Horizontal velocity sensor.
+  double Y;   // Vertical position sensor.
+  double VX;  // Horizontal velocity sensor.
+  double VY;  // Vertical velocity sensor.
+  double TH;  // Angular sensor.
+} sensor = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+
+/* Rover phase. */
+typedef enum {
+  ASCENT,     // Rise to avoid obstacles.
+  ALIGN_X,    // Align rover with the X-axis.
+  REALIGN_X,  // Move back to align rover with the X-axis.
+  DESCENT,    // Descend closer to the landing platform.
+  LAND        // Turn upright and slowly glide down to land.
+} Phase;
+
+Phase phase = ASCENT; // Global rover phase.
+
+/* Thruster identifiers. */
+typedef enum {
+  THR_DEF,    // All thrusters.
+  THR_MAIN,   // Main thruster.
+  THR_LEFT,   // Left thruster.
+  THR_RIGHT   // Right thruster.
+} Thruster;
+
+/* Direction identifiers. */
+typedef enum {
+  DIR_DOWN,   // Down direction.
+  DIR_LEFT,   // Left direction.
+  DIR_RIGHT,  // Right direction.
+  DIR_UP      // Up direction.
+} Direction;
+
 void Lander_Control(void)
 {
  /*
