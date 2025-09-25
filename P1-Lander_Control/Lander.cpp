@@ -423,10 +423,6 @@ void Rotate_and_Fire(Thruster thruster, Direction dir) {
   double curr_angle = fmod(sensor.TH + th_offset + 360, 360);
   if (dir != DIR_DOWN && fabs(curr_angle - target_angle) <= 0.5) {
     switch (thruster) {
-      case THR_MAIN: 
-        Main_Thruster(pwr);
-        power.MAIN = pwr;
-        break;
       case THR_LEFT: 
         Left_Thruster(pwr);
         power.LEFT = pwr;
@@ -434,6 +430,10 @@ void Rotate_and_Fire(Thruster thruster, Direction dir) {
       case THR_RIGHT: 
         Right_Thruster(pwr);
         power.RIGHT = pwr;
+        break;
+      case THR_MAIN: 
+        Main_Thruster(pwr);
+        power.MAIN = pwr;
         break;
     }
   } else {

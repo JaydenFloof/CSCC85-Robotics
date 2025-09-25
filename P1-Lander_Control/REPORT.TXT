@@ -75,7 +75,7 @@ Questions:
 
 
    Only the first available thruster will work at any given time.
-   The order of precedence is: Main > Left > Right.
+   The order of precedence is: Left > Right > Main.
 
    Depending on the thruster chosen, the rover will rotate according
    to the desired direction.
