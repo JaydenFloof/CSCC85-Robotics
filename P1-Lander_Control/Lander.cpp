@@ -476,9 +476,7 @@ void Thruster_Control(double VX_target, double VY_target, bool upright) {
 
   /* Choose an available thruster. */
   Thruster thruster;
-  if (MT_OK && LT_OK && RT_OK) {  // Special state: Use all working thrusters!
-    thruster = THR_DEF;
-  } else if (MT_OK) {
+  if (MT_OK) {
     thruster = THR_MAIN;
   } else if (LT_OK) {
     thruster = THR_LEFT;
