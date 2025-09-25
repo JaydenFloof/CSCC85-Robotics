@@ -3,16 +3,16 @@ CSCC85 - Fundamentals of Robotics and Automated Systems - UTSC
 Project 1 - Fault Tolerant Lander Control
 ______________________________________________________________________
 
-Team name:
+Team name: Robot Rangers
 
-Name 1 (last, first):
-Student number 1:
+Name 1 (last, first): Groshens, David
+Student number 1: 1007728309
 
-Name 2 (last, first):
-Student number 2:
+Name 2 (last, first): Vuong, Jayden
+Student number 2: 1008912688
 
-Name 3 (last, first):
-Student number 3:
+Name 3 (last, first): Shekhtman, Sean
+Student number 3: 1008305371
 
 (special: Lose 5 marks for not completing the above information)
 _______________________________________________________________________
@@ -23,19 +23,23 @@ you think the task could be completed
 
 a) The program can land the craft safely in mode '1'
   
-   - for the 'easy.ppm' map (yes/no)
-   - for the 'hard.ppm' map (yes/no)
+   - for the 'easy.ppm' map (yes/no)  YES
+   - for the 'hard.ppm' map (yes/no)  YES
 
    If it fails, describe the conditions in which it fails and how
    you think this could be resolved
+
+   N/A
 
 b) The program can land the craft safely in mode '2'
   
-   - for the 'easy.ppm' map (yes/no)
-   - for the 'hard.ppm' map (yes/no)
+   - for the 'easy.ppm' map (yes/no)  YES
+   - for the 'hard.ppm' map (yes/no)  YES
 
    If it fails, describe the conditions in which it fails and how
    you think this could be resolved
+
+   N/A
 
 _______________________________________________________________________
 
@@ -48,45 +52,145 @@ Questions:
    determine the state of the craft and ultimately control it 
    properly?
 
+
+   Having noisy sensors means that the state of the craft not only has
+   a certain amount of error, it also means it can grow very quickly if
+   unaccounted for.
+
+   As a result, we can never be sure of the exact state of the rover and
+   must compensate this uncertainty with error handling sophisticated enough
+   to mitigate it.
+
 2) Describe the technique(s) you used to deal with sensor noise
+
+
+   Multiple different strategies were employed to deal with sensor noise.
+   Among which are:
+
+   Mean     - Predicts the next value in a particular sensor.
+   Variance - Determines whether a sensor is faulty.
+   Sampling - Obtain multiple sensor readings to compute a more accurate mean and variance.
 
 3) Describe your strategy for dealing with thruster failures
 
+
+   Only the first available thruster will work at any given time.
+   The order of precedence is: Main > Left > Right.
+
+   Depending on the thruster chosen, the rover will rotate according
+   to the desired direction.
+
 4) Describe your strategy for dealing with sensor malfunctions:
 
-   - Position sensors
-   - Velocity sensors
-   - Angle
-   - Sonar
+   - Position sensors: Recompute either X or Y using VX or VY, using the 
+                       displacement formula, respectively.
+
+   - Velocity sensors: Recompute either VX or VY using X or Y, using the 
+                       translational acceleration formula, respectively.
+
+   - Angle:            Estimated using the current sensor value and the
+                       rotation power applied, though this is inaccurate.
+
+   - Sonar:            Unused component. Don't care if it malfunctions, as
+                       it doesn't affect future predictions whatsoever.
 
    What if you have multiple failures? what could you do if, for
    example both position and velocity sensors became inoperative?
+
+
+   Failures are handled in "groups". For instance, X,Y,VX,VY are grouped
+   under "positional" failures. X can be reconstructed using VX, Y can be
+   reconstructed using VY, and vice versa.
+
+   We group angular failures under "orientational" failures, as it is not
+   so trivial to reconstruct theta using any of the other components, since 
+   they are not as directly related as the positional failures are.
+
+   If both position and velocity sensors become inoperative, then estimation 
+   involves the last known position/velocity and the current rover configuration.
 
 5) What was the hardest failure type to deal with (i.e. which is
    the component, either sensor or control that makes the lander
    harder to handle?)?
 
+
+   The angular sensor was unquestionably the hardest failure type to
+   deal with as it could be easily derived from other sensor values.
+   Noise would accumulate noticibly and prevent the rover from stabilizing
+   over the landing platform as well as slowing down to land safely.
+
 6) Assume a human pilot was in charge of controlling the craft 
    (i.e. the pilot has control of thrusters and rotation).
    How would you change Safety_Override() so that it prevents
    the pilot from accidentally crashing the lander?
+
+
+   Safety_Override() would include logic to prevent the pilot from
+   getting too close to any particular surface too quickly, using a 
+   combination of both position, velocity, and sonar sensor data for 
+   detection. In particular, the rover would move in the opposite direction
+   of the closest surface to slow down and prevent a crash.
    
 7) Do you think it is reasonable to write such a control function?
    (i.e. a routine that takes control from a human for their
     own safety)
 
+
+   Yes, I believe it is reasonable to write a control function that prevents
+   fast acceleration (for some definition of fast) whose course would lead 
+   the pilot to crash the rover. There is no reason for a human pilot
+   to accelerate fast enough into a surface, such that they would not have
+   enough time to recover from their predicament.
+
 8) Should the pilot be aware that this software is present?
    (yes or no, and tell me why you think so!)
+
+
+   I believe the pilot should be aware of the purpose and 
+   functionality behind the Safety_Override(). Not only will
+   this provide some assurance that the software will provide
+   assistance to ensure the pilot's safety, it may also inform 
+   the pilot's future decisions *knowing* that Safety_Override()
+   will activate under conditions the pilot may consider.
 
 9) Would you buy/drive a car that you know has control software
    that will take control from you if it estimates you are
    doing something dangerous?
+
+
+   As long as the software was properly tested, it may certainly be reasonable
+   to take away my control, if for instance, I cannot react fast enough to an
+   oncoming threat.
+
+   On the other hand, if it is unreasonable to have the control software
+   in question, such as if the sensors become faulty and fail to detect 
+   a threat, human intervention may be crucial.
+
+   Removing the ability for human intervention should be considered 
+   **very** carefully, as it may inadvertently cause harm.
 
 10) Can you as an embedded systems designer think of every 
     possible scenario that could go wrong so as to write 
     control software that ALWAYS works?
 
     Think about that...
+
+
+    This is initially seems like a very difficult question.
+
+    The world is not only prone to noise, but is also very complex to 
+    model accurately. Many unpredictable may occur to physical systems
+    that are difficult to account for.
+
+    An easy counterexample to consider for this project in particular, 
+    is the case where all three thrusters become inoperative. It becomes 
+    impossible to land the rover safely as there is nothing which can 
+    slow down the rover enough to land gracefully.
+
+    Therefore, no. It is not possible to design control software 
+    that ALWAYS works, as scenarios which render the embedded system
+    inoperable ALWAYS exist in practice.
+
 ________________________________________________________________
 
 Grading:
