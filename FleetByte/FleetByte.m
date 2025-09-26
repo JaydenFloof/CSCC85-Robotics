@@ -126,9 +126,28 @@
 function [xyzRMS,velRMS,angRMS,hrRMS]=FleetByte(secs, map, deb)
 
 pkg load image;             %%% Comment this out for MATLAB
+pkg load signal;            %%% Imported for some stats functions.
 
 close all;
 %%%%%%%%%% YOU CAN ADD ANY VARIABLES YOU MAY NEED BETWEEN THIS LINE... %%%%%%%%%%%%%%%%%
+
+persistent pos_filt;            % Filtered position. [x y z]
+persistent vel_filt;            % Filtered velocity. (km/h)
+persistent angle_est;           % Estimated angle. (radians)
+persistent hr_filt;             % Filtered heart rate (bpm)
+
+if isempty(pos_filt)
+    pos_filt = [256 256 0.5];   % Center of the map.
+    vel_filt = 10;              % Initial velocity.
+    angle_est = 0;              % Initial angle.
+    hr_filt = 70;               % Initial heart rate.
+end
+
+% "Smootheners". (Lower => Smoother) %
+alpha_pos = 0.4;                % Smoothen position.
+alpha_vel = 0.25;               % Smoothen velocity.
+alpha_ang_correction = 0.15;    % Angle correction strength using displacement direction.
+min_disp_for_direction = 0.5;   % Threshold to trust displacement-derived direction. (meters)
 
 %%%%%%%%%% ... AND THIS LINE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -189,21 +208,166 @@ while(idx<=secs)               %% Main simulation loop
  %    
  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
- xyz=[128 128 .5];       % Replace with your computation of position, the map is 512x512 pixels in size
- hr=82;                  % Replace with your computation of heart rate
- di=[0 1];               % Replace with your computation for running direction, this should be a 2D unit vector
- vel=5;                  % Replace with your computation of running velocity, in Km/h
- 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% POSITION ESTIMATION %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+mps_x = MPS(1);
+mps_y = MPS(2);
+mps_z = MPS(3);
+new_pos = [mps_x, mps_y, mps_z];
+
+% Exponential Smoothing. %
+pos_filt = (1-alpha_pos).*pos_filt + alpha_pos.*new_pos;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% VELOCITY ESTIMATION %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+window_size = 5;
+
+persistent pos_hist;
+persistent last_pos_for_vel;
+if isempty(pos_hist)
+    pos_hist = pos_filt;        
+    last_pos_for_vel = pos_filt; 
+end
+
+% Keep the last `window_size` frames in position history. %
+pos_hist = [pos_hist; pos_filt];      
+if size(pos_hist,1) > window_size
+    pos_hist = pos_hist(end-window_size+1:end,:);
+end
+
+num_frames = size(pos_hist,1);
+if num_frames > 1   % Compute displacement from frames within the position window. %
+    dx = pos_hist(end,1) - pos_hist(1,1);
+    dy = pos_hist(end,2) - pos_hist(1,2);
+    dist = sqrt(dx^2 + dy^2);
+    vel_inst = (dist / (num_frames-1)) * 3.6;  % m/s -> km/h
+else                % Not enough velocity data, keep initial guess. %
+    vel_inst = vel_filt;
+end
+
+% Exponential smoothing. %
+vel_filt = (1-alpha_vel)*vel_filt + alpha_vel*vel_inst;
+vel = vel_filt;
+
+last_pos_for_vel = pos_filt;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% DIRECTION ESTIMATION %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+angle_est = angle_est + Rg;
+
+persistent last_pos_for_direction;
+if isempty(last_pos_for_direction)
+    last_pos_for_direction = pos_filt;
+end
+
+dxh = pos_filt(1) - last_pos_for_direction(1);
+dyh = pos_filt(2) - last_pos_for_direction(2);
+dist_direction = sqrt(dxh^2 + dyh^2);
+if dist_direction > min_disp_for_direction
+    disp_angle = atan2(dyh, dxh);
+    angle_diff = atan2(sin(disp_angle - angle_est), cos(disp_angle - angle_est));
+    angle_est = angle_est + alpha_ang_correction * angle_diff;  % Correct towards displacement angle.
+end
+last_pos_for_direction = pos_filt;
+
+angle_est = atan2(sin(angle_est), cos(angle_est));  % Normalize to [-pi, pi].
+di = [cos(angle_est) sin(angle_est)];               % Unit direction vector.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% HEART RATE ESTIMATION %%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+L = length(HRS);
+t = 0:(L-1);
+
+smooth_HRS = sgolayfilt(HRS, 4, 101);                   % Savitzky-Golay filter.
+smooth_HRS = 3 * (smooth_HRS - min(smooth_HRS) + 1);    % Shift up to avoid negative values.
+
+[amplitude, location] = findpeaks(smooth_HRS, 'MinPeakDistance', 15);
+
+% Ignore the first and last peaks. %
+if length(amplitude) > 2
+    amplitude = amplitude(2:end-1);
+    location = location(2:end-1);
+end
+
+num_peaks = length(amplitude);
+if num_peaks > 0
+    amplitude_threshold = mean(amplitude);
+else
+    amplitude_threshold = 0;
+end
+
+peak_deltas = [];
+location_temp = location;
+for i = 1:num_peaks
+    % Discard peaks outside the threshold. %
+    if amplitude(i) < (amplitude_threshold - 0.5)
+        location_temp(i) = -1;
+    end
+
+    % Get spacing between valid peaks. %
+    if i > 1 && location_temp(i-1) ~= -1 && location_temp(i) ~= -1
+        peak_deltas(end+1) = location_temp(i) - location_temp(i-1);
+    end
+end
+
+persistent prev_hr_estimates;
+if isempty(prev_hr_estimates)
+    prev_hr_estimates = [];
+end
+
+hr = 70;
+
+num_delta = length(peak_deltas);
+if num_delta > 0
+    % Weighted average of intervals. %
+    weight_array = 1:num_delta;
+    weighted_avg = dot(weight_array, peak_deltas) / sum(weight_array);
+    hr = 7000 / weighted_avg;
+    
+    % Smoothen heart rate over most recent 5 frames. %
+    prev_hr_estimates(end+1) = hr;
+    if length(prev_hr_estimates) > 5
+        if hr <= 130
+            if prev_hr_estimates(end) - prev_hr_estimates(end-4) > 7
+                hr = hr + 15;   % Minor correction.
+            end
+        end
+        prev_hr_estimates = prev_hr_estimates(end-4:end);   % Keep last 5 frames.
+    end
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%
+%%% POST-PROCESSING %%%
+%%%%%%%%%%%%%%%%%%%%%%%
+
+xyz = [
+    max(0, min(pos_filt(1), 512)) % 0 <= x <= 512
+    max(0, min(pos_filt(2), 512)) % 0 <= y <= 512
+    max(0, pos_filt(3))           % 0 <= z < +inf
+];
+
  if (deb==1)
      figure(5);clf;plot(HRS);
      fprintf(2,'****** For this frame: *******\n');
      fprintf(2,'MPS=[%f %f %f]\n',MPS(1),MPS(2),MPS(3));
      fprintf(2,'Rate gyro=%f\n',Rg);
+    %  fprintf(2,'Estimated xyz = [%.2f %.2f %.2f]\n', xyz(1), xyz(2), xyz(3));
+    %  fprintf(2,'Estimated vel = %.2f km/h\n', vel);
+    %  fprintf(2,'Estimated angle = %.3f rad (%.1f deg)\n', angle_est, angle_est*180/pi);
+    %  fprintf(2,'Estimated HR = %.2f bpm\n', hr);
      fprintf(2,'---> Press [ENTER] on the Matlab/Octave terminal to continue...\n');
      drawnow;
      pause;
  end;
- 
+
  %%% SOLUTION:   
   
  %%%%%%%%%%%%%%%%%%  DO NOT CHANGE ANY CODE BELOW THIS LINE %%%%%%%%%%%%%%%%%%%%%

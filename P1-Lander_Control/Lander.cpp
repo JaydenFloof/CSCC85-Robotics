@@ -162,9 +162,374 @@
 
 #include "Lander_Control.h"
 
+/* Timesteps. */
+#define VEL_TIMESTEP 0.025                // Velocity timestep.
+#define ACC_TIMESTEP (VEL_TIMESTEP / 10)  // Acceleration timestep.
+
+/* Thresholds. */
+#define VAR_MAX 0.05                      // Maximum variation in a signal.
+#define ROT_MAX (MAX_ROT_RATE * 180 / PI) // Maximum rotation (in radians).
+#define TH_MAX  3.5                       // Maximum difference in angle.
+
+/* Angles. */
+#define TURN_TH (45.0 * PI / 180) // Angle to maintain when a side thruster is working.
+
+/* Acceleration. */
+#define MAIN_ACC (MT_ACCEL * power.MAIN)                                  // Main thruster acceleration.
+#define LR_ACC_DIFF ((LT_ACCEL * power.LEFT) - (RT_ACCEL * power.RIGHT))  // Difference between left and right thruster acceleration.
+
+/* Sampling constants. */
+#define SAMPLE_AMT 100000 // Amount of sensor samples to take.
+#define HIST_BUFSIZE 10   // History buffer size.
+
+/* Simulation state variables. */
+double SIM_TICKS = 0; // Elapsed simulation ticks.
+
+/* History buffers. */
+struct HistoryBuffer {
+  double buf[HIST_BUFSIZE]; // Buffer.
+  size_t idx;               // Index of the most recent element.
+  size_t size;              // Number of entries in the buffer.
+} x_hist = { {0}, 0, 0 };
+
+/* Status flags. */
+struct StatusFlags {
+  bool X_OK;  // True, if the horizontal position sensor is working.
+  bool Y_OK;  // True, if the vertical position sensor is working.
+  bool VX_OK; // True, if the horizontal velocity sensor is working.
+  bool VY_OK; // True, if the vertical velocity sensor is working.
+  bool TH_OK; // True, if the angular sensor is working.
+} status = { true, true, true, true, true };
+
+/* Thruster powers. */
+struct ThrusterPower {
+  double MAIN;  // Main thruster power.
+  double LEFT;  // Left thruster power.
+  double RIGHT; // Right thruster power.
+  double ROT;   // Rotation power.
+} power = { 0.0, 0.0, 0.0, 0.0 };
+
+/* Sensor data. */
+struct SensorData {
+  double X;   // Horizontal velocity sensor.
+  double Y;   // Vertical position sensor.
+  double VX;  // Horizontal velocity sensor.
+  double VY;  // Vertical velocity sensor.
+  double TH;  // Angular sensor.
+} sensor = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+
+/* Rover phase. */
+typedef enum {
+  ASCENT,     // Rise to avoid obstacles.
+  ALIGN_X,    // Align rover with the X-axis.
+  REALIGN_X,  // Move back to align rover with the X-axis.
+  DESCENT,    // Descend closer to the landing platform.
+  LAND        // Turn upright and slowly glide down to land.
+} Phase;
+
+Phase phase = ASCENT; // Global rover phase.
+
+/* Thruster identifiers. */
+typedef enum {
+  THR_DEF,    // All thrusters.
+  THR_MAIN,   // Main thruster.
+  THR_LEFT,   // Left thruster.
+  THR_RIGHT   // Right thruster.
+} Thruster;
+
+/* Direction identifiers. */
+typedef enum {
+  DIR_DOWN,   // Down direction.
+  DIR_LEFT,   // Left direction.
+  DIR_RIGHT,  // Right direction.
+  DIR_UP      // Up direction.
+} Direction;
+
+/* 
+Updates the sensor's value and status `value` and `status`, respectively. 
+Takes multiple samples of a given sensor using its corresponding sensor function `sensor_func`.
+*/
+bool Update_Sensor(double *value, double (*sensor_func)(void), bool *status) {
+  if (*status == false) {
+    return false;
+  }
+  
+  /* Get sensor samples. */
+  double sensor_samples[SAMPLE_AMT];
+  double sample_sum = 0;
+  double sample_max = -1;
+  for (size_t i = 0; i < SAMPLE_AMT; i++) {
+    sensor_samples[i] = sensor_func();
+    sample_sum += sensor_samples[i];
+    if (fabs(sensor_samples[i]) > sample_max) {
+      sample_max = fabs(sensor_samples[i]);
+    }
+  }
+  
+  /* Compute mean and variance across sensor readings. */
+  double sensor_mean = sample_sum / SAMPLE_AMT;
+  double sensor_var = 0;
+  for (size_t i = 0; i < SAMPLE_AMT; i++) {
+    sensor_var += pow((sensor_samples[i] - sensor_mean), 2) / pow(sample_max + 2, 2);
+  }
+  sensor_var = sensor_var / SAMPLE_AMT;
+  
+  /* If the sensor varies too much, consider it faulty. */
+  if (sensor_var >= VAR_MAX) {
+    *status = false;
+    return false;
+  }
+
+  *value = sensor_mean;
+  return true;
+}
+
+/* Updates the angular sensor's value and status. */
+bool Update_Angle(void) {
+  if (!status.TH_OK) {
+    return false;
+  }
+
+  /* Get sensor samples. */
+  double angle_samples[SAMPLE_AMT];
+  double sin_sum = 0.0;
+  double cos_sum = 0.0;
+  double angle_max = -361.0;  // Placeholder, will get overwritten later.
+  double angle_min = 361.0;   // Placeholder, will get overwritten later.
+  for (size_t i = 0; i < SAMPLE_AMT; i++) {
+    double angle_deg = Angle();
+    angle_samples[i] = angle_deg;
+
+    double rad = angle_deg * M_PI / 180.0;
+    sin_sum += sin(rad);
+    cos_sum += cos(rad);
+
+    if (angle_deg > angle_max) {
+      angle_max = angle_deg;
+    }
+    if (angle_deg < angle_min) {
+      angle_min = angle_deg;
+    }
+  }
+
+  /* If the sensor varies too much, consider it faulty. */
+  if (angle_max - angle_min > TH_MAX) {
+    status.TH_OK = false;
+    return false;
+  }
+
+  double mean_deg = fmod((atan2(sin_sum, cos_sum) * 180.0 / M_PI) + 360.0, 360.0);
+  sensor.TH = mean_deg;
+
+  return true;
+}
+
+/* Computes all sensor data. */
+void Compute_Sensor_Data(void) {
+  double y_new = sensor.Y;
+
+  /* Predict the next sensor data. */
+  struct SensorData sensor_pred = { 0.0, 0.0, 0.0, 0.0, 0.0 };
+  if (SIM_TICKS > 0) {
+    /* Translational acceleration. */
+    double X_Acc = MAIN_ACC * sin(sensor.TH) + LR_ACC_DIFF * cos(sensor.TH);
+    double Y_Acc = (G_ACCEL - MAIN_ACC * cos(sensor.TH)) + LR_ACC_DIFF * sin(sensor.TH);
+
+    /* Displacements. */
+    double DX = sensor.VX * VEL_TIMESTEP + (X_Acc * pow(ACC_TIMESTEP, 2)) / 2;
+    double DY = sensor.VY * VEL_TIMESTEP + (Y_Acc * pow(ACC_TIMESTEP, 2)) / 2;
+
+    /* Predictions. */
+    sensor_pred = {
+      .X  = sensor.X + DX,
+      .Y  = sensor.Y - DY,
+      .VX = sensor.VX + X_Acc * ACC_TIMESTEP,
+      .VY = sensor.VY - Y_Acc * ACC_TIMESTEP,
+      .TH = sensor.TH + fmax(-ROT_MAX, fmin(power.ROT, ROT_MAX))
+    };
+  }
+
+  /***********************/
+  /* Update ALL sensors. */
+  /***********************/
+
+  if (!Update_Sensor(&sensor.X, &Position_X, &status.X_OK)) {
+    if (status.VX_OK) {
+      sensor.X += sensor.VX * VEL_TIMESTEP;
+    } else {
+      sensor.X = sensor_pred.X;
+    }
+  }
+
+  if (!Update_Sensor(&sensor.Y, &Position_Y, &status.Y_OK)) {
+    if (status.VY_OK) {
+      sensor.Y -= sensor.VY * VEL_TIMESTEP;
+    } else {
+      sensor.Y = sensor_pred.Y;
+    }
+  }
+
+  x_hist.buf[x_hist.idx] = sensor.X;
+  x_hist.idx = (x_hist.idx + 1) % HIST_BUFSIZE;
+  if (x_hist.size < HIST_BUFSIZE) {
+    x_hist.size++;
+  }
+
+  if (!Update_Sensor(&sensor.VX, &Velocity_X, &status.VX_OK) && status.X_OK) {
+    if (x_hist.size > 0) {
+      int oldest_index = (x_hist.idx - x_hist.size + HIST_BUFSIZE) % HIST_BUFSIZE;
+      double oldest_X = x_hist.buf[oldest_index];
+      sensor.VX = (sensor.X - oldest_X) / (VEL_TIMESTEP * x_hist.size);
+    }
+  }
+
+  if (!Update_Sensor(&sensor.VY, &Velocity_Y, &status.VY_OK)) {
+    if (status.Y_OK) {
+      sensor.VY =  (y_new - sensor.Y) / VEL_TIMESTEP;
+    } else {
+      sensor.VY = sensor_pred.VY;
+    }
+  }
+
+  if (!Update_Angle()) {
+    sensor.TH = sensor_pred.TH;
+  }
+}
+
+/* Rotates and fires the thruster `thruster` in the direction `dir`. */
+void Rotate_and_Fire(Thruster thruster, Direction dir) {
+  double pwr = (dir == DIR_UP || dir == DIR_DOWN) 
+               ? 1.0 
+               : 0.5;
+
+  double th_offset = 0.0;
+  if (thruster == THR_LEFT) {
+    th_offset = 90.0;
+  } else if (thruster == THR_RIGHT) {
+    th_offset = -90.0;
+  }
+
+  double target_angle = 0.0;
+  if (dir == DIR_LEFT) {
+    target_angle = (thruster != THR_LEFT && thruster != THR_RIGHT) 
+                 ? 315.0
+                 : 300.0;
+  } else if (dir == DIR_RIGHT) {
+    target_angle = (thruster != THR_LEFT && thruster != THR_RIGHT)
+                 ? 45.0
+                 : 60.0;
+  }
+
+  double curr_angle = fmod(sensor.TH + th_offset + 360, 360);
+  if (dir != DIR_DOWN && fabs(curr_angle - target_angle) <= 0.5) {
+    switch (thruster) {
+      case THR_LEFT: 
+        Left_Thruster(pwr);
+        power.LEFT = pwr;
+        break;
+      case THR_RIGHT: 
+        Right_Thruster(pwr);
+        power.RIGHT = pwr;
+        break;
+      case THR_MAIN: 
+        Main_Thruster(pwr);
+        power.MAIN = pwr;
+        break;
+    }
+  } else {
+    /* Disable ALL thrusters. */
+    Main_Thruster(0);
+    Left_Thruster(0);
+    Right_Thruster(0);
+    power.MAIN = 0;
+    power.LEFT = 0;
+    power.RIGHT = 0;
+
+    double shortest_rot = fmod(target_angle - curr_angle + 540.0, 360.0) - 180.0;
+    Rotate(shortest_rot);
+    power.ROT = shortest_rot;
+  }
+}
+
+/* 
+Controls available thrusters to reach the target horizontal and vertical velocities 
+`VX_target`, `VY_target`, respectively. 
+
+If `upright` is true, all thrusters will be disabled.
+*/
+void Thruster_Control(double VX_target, double VY_target, bool upright) {
+  if (upright) {
+    /* Disable ALL thrusters. */
+    Main_Thruster(0); 
+    Left_Thruster(0); 
+    Right_Thruster(0);
+    power.MAIN = 0; 
+    power.LEFT = 0; 
+    power.RIGHT = 0;
+
+    double shortest_rot = fmod(540.0 - sensor.TH, 360.0) - 180.0;
+    Rotate(shortest_rot);
+    power.ROT = shortest_rot;
+
+    return;
+  }
+
+  /* Choose an available thruster. */
+  Thruster thruster;
+  if (MT_OK) {
+    thruster = THR_MAIN;
+  } else if (LT_OK) {
+    thruster = THR_LEFT;
+  } else {
+    thruster = THR_RIGHT;
+  }
+
+  /* All thruster mode. */
+  if (thruster == THR_DEF) {
+    if (sensor.VX - VX_target > 0.0) {
+      Left_Thruster(0);
+      Right_Thruster(0.5); 
+      power.LEFT = 0; 
+      power.RIGHT = 0.5;
+    } else {
+      Left_Thruster(0.5); 
+      Right_Thruster(0); 
+      power.LEFT = 0.5; 
+      power.RIGHT = 0;
+    }
+
+    if (sensor.VY - VY_target < 0.0) {
+      Main_Thruster(1.0); 
+      power.MAIN = 1.0;
+    } else {
+      Main_Thruster(0.0);
+      power.MAIN = 0.0;
+    }
+  } else { /* Single thruster mode. */
+    double VX_diff = VX_target - sensor.VX;
+    double VY_diff = VY_target - sensor.VY;
+
+    Direction dir;
+    if (VX_diff >= 1) {
+      dir = DIR_RIGHT;
+    }
+    else if (VX_diff <= -0.5) {
+      dir = DIR_LEFT;
+    }
+    else if (VY_diff >= 0.5) {
+      dir = DIR_UP;
+    }
+    else {
+      dir = DIR_DOWN;
+    }
+
+    Rotate_and_Fire(thruster, dir);
+  }
+}
+
 void Lander_Control(void)
 {
- /*
+  /*
    This is the main control function for the lander. It attempts
    to bring the ship to the location of the landing platform
    keeping landing parameters within the acceptable limits.
@@ -222,16 +587,17 @@ void Lander_Control(void)
  // move faster, decrease speed limits as the module
  // approaches landing. You may need to be more conservative
  // with velocity limits when things fail.
- if (fabs(Position_X()-PLAT_X)>200) VXlim=25;
- else if (fabs(Position_X()-PLAT_X)>100) VXlim=15;
+ Compute_Sensor_Data();
+ SIM_TICKS++;
+  
+ if (fabs(sensor.X-PLAT_X)>200) VXlim=25;
+ else if (fabs(sensor.X-PLAT_X)>100) VXlim=15;
  else VXlim=5;
 
- if (PLAT_Y-Position_Y()>200) VYlim=-20;
- else if (PLAT_Y-Position_Y()>100) VYlim=-10;  // These are negative because they
- else VYlim=-4;				       // limit descent velocity
-
- // Ensure we will be OVER the platform when we land
- if (fabs(PLAT_X-Position_X())/fabs(Velocity_X())>1.25*fabs(PLAT_Y-Position_Y())/fabs(Velocity_Y())) VYlim=0;
+ if (PLAT_Y-sensor.Y>200) VYlim=-20;
+ else if (PLAT_Y-sensor.Y>150) VYlim=-10;  // These are negative because they
+ else if (PLAT_Y-sensor.Y>50) VYlim=-5;    // limit descent velocity
+ else VYlim=-1;
 
  // IMPORTANT NOTE: The code below assumes all components working
  // properly. IT MAY OR MAY NOT BE USEFUL TO YOU when components
@@ -245,47 +611,69 @@ void Lander_Control(void)
  // effect, i.e. the rotation angle does not accumulate
  // for successive calls.
 
- if (Angle()>1&&Angle()<359)
- {
-  if (Angle()>=180) Rotate(360-Angle());
-  else Rotate(-Angle());
-  return;
- }
+  switch (phase) {
+    case ASCENT:
+      if (Angle()>1&&Angle()<359) {
+        Thruster_Control(0.0, 0.0, true);
+      } else {
+        phase = ALIGN_X;
+      }
+    break;
 
- // Module is oriented properly, check for horizontal position
- // and set thrusters appropriately.
- if (Position_X()>PLAT_X)
- {
-  // Lander is to the LEFT of the landing platform, use Right thrusters to move
-  // lander to the left.
-  Left_Thruster(0);	// Make sure we're not fighting ourselves here!
-  if (Velocity_X()>(-VXlim)) Right_Thruster((VXlim+fmin(0,Velocity_X()))/VXlim);
-  else
-  {
-   // Exceeded velocity limit, brake
-   Right_Thruster(0);
-   Left_Thruster(fabs(VXlim-Velocity_X()));
-  }
- }
- else
- {
-  // Lander is to the RIGHT of the landing platform, opposite from above
-  Right_Thruster(0);
-  if (Velocity_X()<VXlim) Left_Thruster((VXlim-fmax(0,Velocity_X()))/VXlim);
-  else
-  {
-   Left_Thruster(0);
-   Right_Thruster(fabs(VXlim-Velocity_X()));
-  }
- }
+    case ALIGN_X:
+      if (sensor.Y > 65.0) {
+        Thruster_Control(0.0, 10.0, false);
+      } else if (fabs(sensor.VX) > 2.0) {
+        Thruster_Control(0.0, 0.0, false);
+      } else {
+        phase = REALIGN_X;
+      }
+    break;
 
- // Vertical adjustments. Basically, keep the module below the limit for
- // vertical velocity and allow for continuous descent. We trust
- // Safety_Override() to save us from crashing with the ground.
- if (Velocity_Y()<VYlim) Main_Thruster(1.0);
- else Main_Thruster(0);
+    case REALIGN_X:
+      if (sensor.VY > -1.0) {
+        Thruster_Control(0.0, -5.0, false);
+      } else {
+        phase = DESCENT;
+      }
+    break;
+
+    case DESCENT: {
+      /* Constant deacceleration formula. */
+      double stop_dist = pow(sensor.VX, 2) / (2 * G_ACCEL) + (TURN_TH / MAX_ROT_RATE * sensor.VX);
+      if (fabs(sensor.X - PLAT_X) > stop_dist) {
+        if ((sensor.X - PLAT_X) > 20) {
+          Thruster_Control(-20.0, 0.0, false);
+        } else if ((sensor.X - PLAT_X) < -20) {
+          Thruster_Control(20.0, 0.0, false);
+        } else {
+          Thruster_Control(0.0, VYlim, false);
+        }
+      } else {
+        Thruster_Control(0.0, VYlim, false);
+      }
+
+      /* Hovering above landing platform. */
+      if (fabs(sensor.X - PLAT_X) < 20.0 && fabs(sensor.VX) < 10.0) {
+        Thruster_Control(0.0, VYlim, false);
+      }
+      
+      if (fabs(sensor.Y - PLAT_Y) <= 40.0) {
+        phase = LAND;
+      }
+    }
+    break;
+
+    case LAND:
+      Thruster_Control(0.0, -5.0, true);
+    break;
+  }
 }
 
+/* 
+Do nothing. 
+Safety mode is effectively the default in this implementation.
+*/
 void Safety_Override(void)
 {
  /*
@@ -316,93 +704,5 @@ void Safety_Override(void)
   carry out speed corrections using the thrusters
 **************************************************/
 
- double DistLimit;
- double Vmag;
- double dmin;
-
- // Establish distance threshold based on lander
- // speed (we need more time to rectify direction
- // at high speed)
- Vmag=Velocity_X()*Velocity_X();
- Vmag+=Velocity_Y()*Velocity_Y();
-
- DistLimit=fmax(75,Vmag);
-
- // If we're close to the landing platform, disable
- // safety override (close to the landing platform
- // the Control_Policy() should be trusted to
- // safely land the craft)
- if (fabs(PLAT_X-Position_X())<150&&fabs(PLAT_Y-Position_Y())<150) return;
-
- // Determine the closest surfaces in the direction
- // of motion. This is done by checking the sonar
- // array in the quadrant corresponding to the
- // ship's motion direction to find the entry
- // with the smallest registered distance
-
- // Horizontal direction.
- dmin=1000000;
- if (Velocity_X()>0)
- {
-  for (int i=5;i<14;i++)
-   if (SONAR_DIST[i]>-1&&SONAR_DIST[i]<dmin) dmin=SONAR_DIST[i];
- }
- else
- {
-  for (int i=22;i<32;i++)
-   if (SONAR_DIST[i]>-1&&SONAR_DIST[i]<dmin) dmin=SONAR_DIST[i];
- }
- // Determine whether we're too close for comfort. There is a reason
- // to have this distance limit modulated by horizontal speed...
- // what is it?
- if (dmin<DistLimit*fmax(.25,fmin(fabs(Velocity_X())/5.0,1)))
- { // Too close to a surface in the horizontal direction
-  if (Angle()>1&&Angle()<359)
-  {
-   if (Angle()>=180) Rotate(360-Angle());
-   else Rotate(-Angle());
-   return;
-  }
-
-  if (Velocity_X()>0){
-   Right_Thruster(1.0);
-   Left_Thruster(0.0);
-  }
-  else
-  {
-   Left_Thruster(1.0);
-   Right_Thruster(0.0);
-  }
- }
-
- // Vertical direction
- dmin=1000000;
- if (Velocity_Y()>5)      // Mind this! there is a reason for it...
- {
-  for (int i=0; i<5; i++)
-   if (SONAR_DIST[i]>-1&&SONAR_DIST[i]<dmin) dmin=SONAR_DIST[i];
-  for (int i=32; i<36; i++)
-   if (SONAR_DIST[i]>-1&&SONAR_DIST[i]<dmin) dmin=SONAR_DIST[i];
- }
- else
- {
-  for (int i=14; i<22; i++)
-   if (SONAR_DIST[i]>-1&&SONAR_DIST[i]<dmin) dmin=SONAR_DIST[i];
- }
- if (dmin<DistLimit)   // Too close to a surface in the horizontal direction
- {
-  if (Angle()>1||Angle()>359)
-  {
-   if (Angle()>=180) Rotate(360-Angle());
-   else Rotate(-Angle());
-   return;
-  }
-  if (Velocity_Y()>2.0){
-   Main_Thruster(0.0);
-  }
-  else
-  {
-   Main_Thruster(1.0);
-  }
- }
+ return;
 }
