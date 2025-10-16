@@ -68,7 +68,7 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
   int t = 0;
   double integralErr = 0.0;
   double derivativeErr = 0.0;
-  double errArray[5];
+  double errArray[distance];
   double PID;
   BT_read_gyro(PORT_4, 1, &angle, &rate);
   while (t < distance) {
@@ -78,9 +78,9 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
     if (t < 5)
       integralErr += fabs(errArray[t]);
     else
-      shift_left_add(errArray, 5, angle);
-      //integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
-      integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+      //shift_left_add(errArray, 5, angle);
+      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
     if (t > 0)
       derivativeErr = errArray[t-1] - errArray[t];
     else
@@ -157,7 +157,7 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, 
   int t = 0;
   double integralErr = 0.0;
   double derivativeErr = 0.0;
-  double errArray[5];
+  double errArray[maxDistance];
   double PID;
   BT_read_gyro(PORT_4, 1, &angle, &rate);
   while (t < maxDistance && colour == 'K') {
@@ -167,9 +167,9 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, 
     if (t < 5)
       integralErr += fabs(errArray[t]);
     else
-      shift_left_add(errArray, 5, angle);
-      //integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
-      integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+      //shift_left_add(errArray, 5, angle);
+      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
     if (t > 0)
       derivativeErr = errArray[t-1] - errArray[t];
     else
