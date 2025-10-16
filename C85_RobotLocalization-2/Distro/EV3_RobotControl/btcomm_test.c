@@ -87,7 +87,8 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
       derivativeErr = 0.0;
     PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
     printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
-    BT_turn(motor_port_right, speed + PID, motor_port_left, speed - PID);
+    if (PID + speed > 100) PID = 100 - speed;
+    BT_turn(motor_port_right, speed + (int)PID, motor_port_left, speed - (int)PID);
     t += 1;
   }  
   return 0;
@@ -175,7 +176,8 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, 
       derivativeErr = 0.0;
     PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
     printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
-    BT_turn(motor_port_right, speed + PID, motor_port_left, speed - PID);
+    if (PID + speed > 100) PID = 100 - speed;
+    BT_turn(motor_port_right, speed + (int)PID, motor_port_left, speed - (int)PID);
 
     BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
     colour = RR_get_colour(r, g, b, a);
