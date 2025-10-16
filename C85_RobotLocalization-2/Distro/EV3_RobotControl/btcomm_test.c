@@ -92,6 +92,73 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
   return 0;
 }
 
+char RR_get_colour(int r, int g, int b, int a){
+
+
+  int black = 135;
+  int white = 150;
+
+  double blue = 1.15;
+  double green = 1.6;
+  double red = 1.5;
+  double yellow = 3.0;
+
+  if(r == 0 || b == 0 || g == 0){
+    return 'U'; // If any value is zero, assume unknown
+  }
+
+  if((double)r/g >= red && (double)r/b >= red){
+    printf(" red is R: %lf, G: %lf, B: %lf\n", (double)r, (double)r/g, (double)r/b);
+    return 'R'; // Red
+  }
+  else if((double)g>r && (double)g/b >= green){
+    printf(" green is R: %lf, G: %lf, B: %lf\n", (double)r/g, (double)g/g, (double)g/b);
+    return 'G'; // Green
+  }
+  else if((double)b/r >= blue && (double)b/g >= blue){
+    printf(" blue is R: %lf, G: %lf, B: %lf\n", (double)b/r, (double)b/g, (double)b);
+    return 'B'; // Blue
+  }
+  else if(r/b >= yellow && g/b >= yellow){
+    printf(" yellow is R: %lf, G: %lf, B: %lf\n", (double)r/b, (double)g/b, (double)r/b);
+    return 'Y'; // Yellow
+  }
+  else if((double)r > white && (double)g > white && (double)b > white){
+    printf(" white is R: %lf, G: %lf, B: %lf\n", (double)r, (double)g, (double)b);
+    return 'W'; // White
+  }
+  else if((double)r < black && (double)g < black && (double)b < black){ 
+    printf(" black is R: %lf, G: %lf, B: %lf\n", (double)r, (double)g, (double)b);
+    return 'K'; // Black
+  }
+  else{
+    return 'U'; // If unknown, assume White (a wall)
+  }
+}
+
+int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left){
+  int r;
+  int g;
+  int b;
+  int a;
+  char colour;
+  int distance = 0;
+  BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
+  colour = RR_get_colour(r, g, b, a);
+  printf("Colour sensor reading: Colour=%c\n", colour);
+
+  while(colour = 'K') {
+    BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
+    colour = RR_get_colour(r, g, b, a);
+    printf("Colour sensor reading: Colour=%c\n", colour);
+    RR_straightLineMovement(speed, distance, char motor_port_right, char motor_port_left)
+    }
+  }
+  BT_all_stop(1);
+  return 0;
+}
+
+
 int main(int argc, char *argv[]) {
   char test_msg[8] = {0x06, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x01};
   char reply[1024];
