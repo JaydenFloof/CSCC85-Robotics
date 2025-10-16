@@ -21,6 +21,7 @@
 
 #include "btcomm.h"
 #include <math.h>
+#include <string.h>
 
 
 int RR_turn(char direction, int speed, int degree, char motor_port_right, char motor_port_left) {
@@ -46,6 +47,50 @@ int RR_turn(char direction, int speed, int degree, char motor_port_right, char m
   return 0;
 }
 
+static void shift_left_add(double arr[], int len, double new_value) {
+  //shift all values of arr left, drop oldest, append new_value at the end
+  if (len <= 0) return;
+  for (int i = 0; i < len - 1; ++i) {
+    arr[i] = arr[i + 1];
+  }
+  arr[len - 1] = new_value;
+}
+
+int RR_straightLineMovement(int speed, int distance, char motor_port_right, char motor_port_left) {
+  // move straight at speed speed and distance distance, distance > 0
+  // speed > 0 for forward movement, speed < 0 for backward movement
+
+  int angle = 0;
+  int rate;
+  double kp = 1;
+  double ki = 0.01;
+  double kd = 0.05;
+  int t = 0;
+  double integralErr = 0.0;
+  double derivativeErr = 0.0;
+  double errArray[distance];
+  double PID;
+  BT_read_gyro(PORT_4, 1, &angle, &rate);
+  while (t < distance) {
+    BT_read_gyro(PORT_4, 0, &angle, &rate);
+    errArray[t] = angle;
+    //integralErr += fabs(errArray[t]);
+    if (t < 4)
+      integralErr += fabs(errArray[t]);
+    else
+      //shift_left_add(errArray, 4, 0 - angle);
+      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+    if (t > 0)
+      derivativeErr = errArray[t-1] - errArray[t];
+    else
+      derivativeErr = 0.0;
+    PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
+    printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
+    BT_turn(motor_port_right, speed + PID, motor_port_left, speed - PID);
+    t += 1;
+  }  
+  return 0;
+}
 
 int main(int argc, char *argv[]) {
   char test_msg[8] = {0x06, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x01};
@@ -92,12 +137,12 @@ int main(int argc, char *argv[]) {
   int b;
   int angle = 0;
   int rate = 0;
-  BT_read_gyro(PORT_4, 1, &angle, &rate);  // Reset reference angle to 0
   if (argc > 1)
     BT_all_stop(1);
   else {
-    RR_turn('r', 100, 25, MOTOR_A, MOTOR_D);
-    RR_turn('l', 100, 25, MOTOR_A, MOTOR_D);
+    //RR_turn('r', 100, 180, MOTOR_A, MOTOR_D);
+    //RR_turn('l', 100, 25, MOTOR_A, MOTOR_D);
+    RR_straightLineMovement(20, 500, MOTOR_A, MOTOR_D);
     BT_all_stop(1);
     //BT_motor_port_start(MOTOR_A | MOTOR_D, 100);
     //BT_read_colour_RGBraw_NXT(PORT_1, &r, &g, &b, &a);
