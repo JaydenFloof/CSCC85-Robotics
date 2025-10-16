@@ -56,7 +56,7 @@ static void shift_left_add(double arr[], int len, double new_value) {
   arr[len - 1] = new_value;
 }
 
-int RR_straightLineMovement(int speed, int distance, char motor_port_right, char motor_port_left) {
+int RR_straightLineMovement(int targetDegree, int speed, int distance, char motor_port_right, char motor_port_left) {
   // move straight at speed speed and distance distance, distance > 0
   // speed > 0 for forward movement, speed < 0 for backward movement
 
@@ -73,7 +73,7 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
   BT_read_gyro(PORT_4, 1, &angle, &rate);
   while (t < distance) {
     BT_read_gyro(PORT_4, 0, &angle, &rate);
-    errArray[t] = angle;
+    errArray[t] = angle - targetDegree;
     //integralErr += fabs(errArray[t]);
     if (t < 5)
       integralErr += fabs(errArray[t]);
