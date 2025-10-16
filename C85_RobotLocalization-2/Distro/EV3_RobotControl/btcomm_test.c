@@ -159,7 +159,7 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, 
   double errArray[5];
   double PID;
   BT_read_gyro(PORT_4, 1, &angle, &rate);
-  while (t < maxDistance && colour = 'K') {
+  while (t < maxDistance && colour == 'K') {
     BT_read_gyro(PORT_4, 0, &angle, &rate);
     errArray[t] = angle;
     //integralErr += fabs(errArray[t]);
