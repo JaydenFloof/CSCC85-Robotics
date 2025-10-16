@@ -24,6 +24,7 @@
 #include <string.h>
 
 
+
 int RR_turn(char direction, int speed, int degree, char motor_port_right, char motor_port_left) {
   // turn left at speed speed and degree degree, degree and speed > 0
   // direction = 'l' or 'r'
@@ -37,9 +38,9 @@ int RR_turn(char direction, int speed, int degree, char motor_port_right, char m
   BT_read_gyro(PORT_4, 1, &turn_degree, &rate);
   while (fabs(turn_degree%360) < degree) {
     if (direction == 'r')
-      BT_turn(motor_port_right, 0, motor_port_left, speed);
+      BT_turn(motor_port_right, -speed, motor_port_left, speed);
     else
-      BT_turn(motor_port_right, speed, motor_port_left, 0);
+      BT_turn(motor_port_right, speed, motor_port_left, -speed);
     BT_read_gyro(PORT_4, 0, &turn_degree, &rate);
     printf("Gyro reading: angle=%d, rate=%d\n", turn_degree%360, rate);
   }
@@ -75,21 +76,264 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
     BT_read_gyro(PORT_4, 0, &angle, &rate);
     errArray[t] = angle;
     //integralErr += fabs(errArray[t]);
-    if (t < 4)
+    if (t < 5)
       integralErr += fabs(errArray[t]);
     else
-      //shift_left_add(errArray, 4, 0 - angle);
+      //shift_left_add(errArray, 5, angle);
       integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
     if (t > 0)
       derivativeErr = errArray[t-1] - errArray[t];
     else
       derivativeErr = 0.0;
     PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
     printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
-    BT_turn(motor_port_right, speed + PID, motor_port_left, speed - PID);
+    if (PID + speed > 100) PID = 100 - speed;
+    BT_turn(motor_port_right, speed + (int)PID, motor_port_left, speed - (int)PID);
     t += 1;
   }  
   return 0;
+}
+
+char RR_get_colour(){
+
+  int r,g,b,a;
+
+  int status = BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
+
+  int black = 135;
+  int white = 150;
+
+  double blue = 1.15;
+  double green = 1.8;
+  double red = 1.7;
+  double yellow = 4.5;
+
+  printf("R: %d, G: %d, B: %d, A: %d\n", r, g, b, a);
+
+  if(r == 0 && b == 0 && g == 0){
+    return 'F'; // If any value is zero, assume unknown
+  }
+  else{
+    r+= 1;
+    g+= 1;
+    b+= 1;
+  }
+
+  if((double)r/g >= red && (double)r/b >= red){
+    printf(" red is R: %lf, G: %lf, B: %lf\n", (double)r, (double)r/g, (double)r/b);
+    return 'R'; // Red
+  }
+  else if((double)g/r >= 0.9 && (double)g/r <= 1.6 && (double)g/b >= green && fabs(g-r) > 5){
+    printf(" green is R: %lf, G: %lf, B: %lf\n", (double)g/r, (double)g/g, (double)g/b);
+    return 'G'; // Green
+  }
+  else if((double)b/r >= blue && (double)b/g >= blue && r<b){
+    printf(" blue is R: %lf, G: %lf, B: %lf\n", (double)b/r, (double)b/g, (double)b);
+    return 'B'; // Blue
+  }
+  else if(r/b >= yellow && g/b >= yellow && r!=g){
+    printf(" yellow is R: %lf, G: %lf, B: %lf\n", (double)r/b, (double)g/b, (double)r/b);
+    return 'Y'; // Yellow
+  }
+  else if((double)r > white && (double)g > white && (double)b > white){
+    printf(" white is R: %lf, G: %lf, B: %lf\n", (double)r, (double)g, (double)b);
+    return 'W'; // White
+  }
+  else if((double)r < black && (double)g < black && (double)b < black){ 
+    printf(" black is R: %lf, G: %lf, B: %lf\n", (double)r, (double)g, (double)b);
+    return 'K'; // Black
+  }
+  else{
+    return 'U'; // If unknown, assume White (a wall)
+  }
+}
+
+char RR_get_colour_majority() {
+    int countR = 0, countG = 0, countB = 0, countY = 0, countW = 0, countK = 0, countF = 0, countU = 0;
+    int i;
+    for (i = 0; i < 4; i++) {
+        char c = RR_get_colour();
+
+        switch (c) {
+            case 'R': countR++; break;
+            case 'G': countG++; break;
+            case 'B': countB++; break;
+            case 'Y': countY++; break;
+            case 'W': countW++; break;
+            case 'K': countK++; break;
+            case 'F': countF++; break;
+            case 'U': countU++; break;
+        }
+    }
+
+    int maxCount = countR;
+    char majority = 'R';
+
+    if (countG > maxCount) { maxCount = countG; majority = 'G'; }
+    if (countB > maxCount) { maxCount = countB; majority = 'B'; }
+    if (countY > maxCount) { maxCount = countY; majority = 'Y'; }
+    if (countW > maxCount) { maxCount = countW; majority = 'W'; }
+    if (countK > maxCount) { maxCount = countK; majority = 'K'; }
+    if (countF > maxCount) { maxCount = countF; majority = 'F'; }
+    if (countU == 4) {majority = 'U'; }
+
+    printf("\nColour sensor reading: Colour=%c\n\n", majority);
+
+    return majority;
+}
+
+
+int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int *angle, int targetDegree){
+  int r;
+  int g;
+  int b;
+  int a;
+  char colour;
+  //int distance = 10;
+  //BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
+  colour = RR_get_colour_majority();
+  printf("Colour sensor reading: Colour=%c\n", colour);
+
+  //int angle = 0;
+  int rate;
+  double kp = 1;
+  double ki = 0.01;
+  double kd = 0.05;
+  int t = 0;
+  double integralErr = 0.0;
+  double derivativeErr = 0.0;
+  double errArray[maxDistance];
+  double PID;
+  //BT_read_gyro(PORT_4, 1, &angle, &rate);
+  while (t < maxDistance && (colour == 'K' || colour == 'U')) {
+    BT_read_gyro(PORT_4, 0, angle, &rate);
+    errArray[t] = *angle - targetDegree;
+    //integralErr += fabs(errArray[t]);
+    if (t < 5)
+      integralErr += fabs(errArray[t]);
+    else
+      //shift_left_add(errArray, 5, angle);
+      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+    if (t > 0)
+      derivativeErr = errArray[t-1] - errArray[t];
+    else
+      derivativeErr = 0.0;
+    PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
+    printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
+    if (PID + speed > 50) PID = 50 - speed;
+    BT_turn(motor_port_right, speed + (int)PID, motor_port_left, speed - (int)PID);
+
+    colour = RR_get_colour_majority();
+    printf("Colour sensor reading: Colour=%c\n", colour);
+    //RR_straightLineMovement(speed, distance, motor_port_right, motor_port_left);
+    t += 1;
+  }
+  BT_all_stop(1);
+  return 0;
+}
+
+int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int targetDegree, int *angle){
+  // int r;
+  // int g;
+  // int b;
+  // int a;
+  // char colour;
+  //int distance = 10;
+  char colour = RR_get_colour_majority();
+
+  //int angle = 0;
+  int rate;
+  double kp = 0.25;
+  double ki = 0.01;
+  double kd = 0.05;
+  int t = 0;
+  double integralErr = 0.0;
+  double derivativeErr = 0.0;
+  double errArray[maxDistance];
+  double PID = -3;
+  //BT_read_gyro(PORT_4, 1, &angle, &rate);
+  while (t < maxDistance && fabs(PID) > 2) {
+    BT_read_gyro(PORT_4, 0, angle, &rate);
+    errArray[t] = *angle - targetDegree;
+    //integralErr += fabs(errArray[t]);
+    if (t < 5)
+      integralErr += fabs(errArray[t]);
+    else
+      //shift_left_add(errArray, 5, angle);
+      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+    if (t > 0)
+      derivativeErr = errArray[t-1] - errArray[t];
+    else
+      derivativeErr = 0.0;
+    PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
+    printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
+    if (fabs(speed * PID) > 50) {
+        PID = (PID > 0) ? 50/speed : -50/speed;
+        printf("Clamped PID: %.2f\n", PID);
+    }
+    printf("PID: %.2f\n", PID);
+    // if(speed - PID < -100) PID = 100 + speed;
+    printf("Turning with speed %d and %d\n", speed*(int)PID, -speed*(int)PID);
+    //if (!(fabs(speed * PID) > 100))
+    BT_turn(motor_port_right, speed*(int)PID, motor_port_left, -speed*(int)PID);
+
+    colour = RR_get_colour_majority();
+    printf("Colour sensor reading: Colour=%c\n", colour);
+    //RR_straightLineMovement(speed, distance, motor_port_right, motor_port_left);
+    t += 1;
+  }
+
+  BT_all_stop(1);
+  return 0;
+}
+
+int RR_turn_next_road(int speed, char motor_port_right, char motor_port_left, int targetDegree) {
+  int angle = 0;
+  int rate;
+  char colour;
+  for (int i = 10; i <= targetDegree; i+=10) {
+    colour = RR_get_colour_majority();
+    if (colour != 'Y') {
+      RR_straightLineMovement(-20, 15, motor_port_right, motor_port_left);
+    }
+    else if (colour == 'K') {
+      break;
+    }
+    //RR_turn_down_one_road(speed, motor_port_right, motor_port_left, 100, i);
+    RR_turn('r', speed, i, motor_port_right, motor_port_left);
+  
+  return 0;
+  } 
+}
+
+int closest_cardinal_angle(int angle) {
+    // Normalize the angle to [0, 360)
+    angle = angle%360;
+    if (angle < 0)
+        angle += 360.0;
+
+    // Define the main cardinal angles
+    int cardinals[] = {0, 90, 180, 270, 360};
+    int closest = cardinals[0];
+    double min_diff = fabs(angle - cardinals[0]);
+
+    // Find the closest cardinal
+    for (int i = 1; i < 5; i++) {
+        double diff = fabs(angle - cardinals[i]);
+        if (diff < min_diff) {
+            min_diff = diff;
+            closest = cardinals[i];
+        }
+    }
+
+    // Treat 360 as 0
+    if (closest == 360)
+        closest = 0;
+
+    return closest;
 }
 
 int main(int argc, char *argv[]) {
@@ -119,6 +363,8 @@ int main(int argc, char *argv[]) {
 
   memset(&reply[0], 0, 1024);
 
+
+
 // just uncomment your bot's hex key to compile for your bot, and comment the
 // other ones out.
 #ifndef HEXKEY
@@ -137,12 +383,84 @@ int main(int argc, char *argv[]) {
   int b;
   int angle = 0;
   int rate = 0;
+  char colour;
   if (argc > 1)
     BT_all_stop(1);
   else {
-    //RR_turn('r', 100, 180, MOTOR_A, MOTOR_D);
-    //RR_turn('l', 100, 25, MOTOR_A, MOTOR_D);
-    RR_straightLineMovement(20, 500, MOTOR_A, MOTOR_D);
+    // RR_turn('r', 100, 180, MOTOR_A, MOTOR_D);
+    // RR_turn('l', 100, 25, MOTOR_A, MOTOR_D);
+    // RR_straightLineMovement(20, 500, MOTOR_A, MOTOR_D);
+    // RR_go_down_one_road(20, MOTOR_A, MOTOR_D, 200);
+
+    // while(1){
+    //   RR_go_down_one_road(15, MOTOR_A, MOTOR_D, 200);
+    //   RR_turn_down_one_road(15, MOTOR_A, MOTOR_D, 250, 10);
+    //   colour = RR_get_colour_majority();
+    //   while (!(colour == 'K' || colour == 'Y')) {
+    //     BT_turn(MOTOR_A, -10, MOTOR_D, -10);
+    //     colour = RR_get_colour_majority();
+    //   }
+    //   RR_turn_down_one_road(-15, MOTOR_A, MOTOR_D, 250, 10);
+    //   colour = RR_get_colour_majority();
+    //   while (!(colour == 'K' || colour == 'Y')) {
+    //     BT_turn(MOTOR_A, 10, MOTOR_D, 10);
+    //     colour = RR_get_colour_majority();
+    //   }
+    // }
+    //while (1) {
+
+      //RR_go_down_one_road(15, MOTOR_A, MOTOR_D, 200);
+      // printf("SWITCHING =90========================================================\n");
+      // //RR_turn_next_road(15, MOTOR_A, MOTOR_D, 90);
+      // RR_straightLineMovement(20, 100, MOTOR_A, MOTOR_D);
+      // //RR_turn_down_one_road(3, MOTOR_A, MOTOR_D, 250, 10);
+      // // RR_turn_down_one_road(2, MOTOR_A, MOTOR_D, 250, 90);
+      // // RR_turn('r', 20, 90, MOTOR_A, MOTOR_D);
+      // printf("SWITCHING =========================================================\n");
+      // colour = RR_get_colour_majority();
+      // while (!(colour == 'K' || colour == 'Y')) {
+      //   BT_turn(MOTOR_A, -10, MOTOR_D, -10);
+      //   colour = RR_get_colour_majority();
+      // }
+      // printf("SWITCHING =========================================================\n");
+    //}
+    
+    BT_read_gyro(PORT_4, 1, &angle, &rate);
+    int speed = 15;
+    int targetDegree = 0;
+    int targetDegreeTurn = 0;
+    int isOnRoad = 1;
+    while (1) {
+      if (isOnRoad) {
+        targetDegree = closest_cardinal_angle(angle);
+        targetDegreeTurn = (targetDegree + 90) % 360;
+        isOnRoad = 0;
+      }
+      RR_go_down_one_road(10, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+      BT_turn(MOTOR_A, -15, MOTOR_D, -15);
+      RR_turn_down_one_road(3, MOTOR_A, MOTOR_D, 250, (targetDegreeTurn)%360, &angle);
+      printf("\nSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSs");
+      targetDegree = closest_cardinal_angle(angle);
+      BT_turn(MOTOR_A, 15, MOTOR_D, 15);
+      RR_go_down_one_road(10, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+      printf("\nANGLE: %d\n", angle);
+      colour = RR_get_colour_majority();
+      // while (!(colour == 'K' || colour == 'Y' || colour == 'U')) {
+      //   BT_turn(MOTOR_A, -15, MOTOR_D, -15);
+      //   colour = RR_get_colour_majority();
+      // }
+      //RR_turn_down_one_road(3, MOTOR_A, MOTOR_D, 250, (targetDegree+90)%360, &angle);
+      angle = angle%360;
+      speed = -speed;
+    }
+    
+    // colour = RR_get_colour_majority();
+    // while (!(colour == 'K' || colour == 'Y')) {
+    //   BT_turn(MOTOR_A, 10, MOTOR_D, 10);
+    //   colour = RR_get_colour_majority();
+    // }
+    //RR_turn_down_one_road(15, MOTOR_A, MOTOR_D, 200, 0);
+      
     BT_all_stop(1);
     //BT_motor_port_start(MOTOR_A | MOTOR_D, 100);
     //BT_read_colour_RGBraw_NXT(PORT_1, &r, &g, &b, &a);
