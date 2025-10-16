@@ -137,23 +137,51 @@ char RR_get_colour(int r, int g, int b, int a){
   }
 }
 
-int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left){
+int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance){
   int r;
   int g;
   int b;
   int a;
   char colour;
-  int distance = 10;
+  //int distance = 10;
   BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
   colour = RR_get_colour(r, g, b, a);
   printf("Colour sensor reading: Colour=%c\n", colour);
 
-  while(colour = 'K') {
+  int angle = 0;
+  int rate;
+  double kp = 1;
+  double ki = 0.01;
+  double kd = 0.05;
+  int t = 0;
+  double integralErr = 0.0;
+  double derivativeErr = 0.0;
+  double errArray[5];
+  double PID;
+  BT_read_gyro(PORT_4, 1, &angle, &rate);
+  while (t < maxDistance && colour = 'K') {
+    BT_read_gyro(PORT_4, 0, &angle, &rate);
+    errArray[t] = angle;
+    //integralErr += fabs(errArray[t]);
+    if (t < 5)
+      integralErr += fabs(errArray[t]);
+    else
+      shift_left_add(errArray, 5, angle);
+      //integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+    if (t > 0)
+      derivativeErr = errArray[t-1] - errArray[t];
+    else
+      derivativeErr = 0.0;
+    PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
+    printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
+    BT_turn(motor_port_right, speed + PID, motor_port_left, speed - PID);
+
     BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
     colour = RR_get_colour(r, g, b, a);
     printf("Colour sensor reading: Colour=%c\n", colour);
-    RR_straightLineMovement(speed, distance, motor_port_right, motor_port_left)
-    }
+    //RR_straightLineMovement(speed, distance, motor_port_right, motor_port_left);
+    t += 1;
   }
   BT_all_stop(1);
   return 0;
