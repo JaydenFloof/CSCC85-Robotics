@@ -68,18 +68,19 @@ int RR_straightLineMovement(int speed, int distance, char motor_port_right, char
   int t = 0;
   double integralErr = 0.0;
   double derivativeErr = 0.0;
-  double errArray[distance];
+  double errArray[5];
   double PID;
   BT_read_gyro(PORT_4, 1, &angle, &rate);
   while (t < distance) {
     BT_read_gyro(PORT_4, 0, &angle, &rate);
     errArray[t] = angle;
     //integralErr += fabs(errArray[t]);
-    if (t < 4)
+    if (t < 5)
       integralErr += fabs(errArray[t]);
     else
-      //shift_left_add(errArray, 4, 0 - angle);
-      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      shift_left_add(errArray, 5, angle);
+      //integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
     if (t > 0)
       derivativeErr = errArray[t-1] - errArray[t];
     else
@@ -142,7 +143,7 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left){
   int b;
   int a;
   char colour;
-  int distance = 0;
+  int distance = 10;
   BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
   colour = RR_get_colour(r, g, b, a);
   printf("Colour sensor reading: Colour=%c\n", colour);
@@ -151,7 +152,7 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left){
     BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
     colour = RR_get_colour(r, g, b, a);
     printf("Colour sensor reading: Colour=%c\n", colour);
-    RR_straightLineMovement(speed, distance, char motor_port_right, char motor_port_left)
+    RR_straightLineMovement(speed, distance, motor_port_right, motor_port_left)
     }
   }
   BT_all_stop(1);
