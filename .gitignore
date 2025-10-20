@@ -1,5 +1,6 @@
 # C stuff
 *.o
+a.out
 
 # P1
 Lander_Control
