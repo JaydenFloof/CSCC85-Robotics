@@ -1,14 +1,14 @@
 /*
 
   CSC C85 - Embedded Systems - Project # 1 - EV3 Robot Localization
-  
+
  This file provides the implementation of all the functionality required for the EV3
  robot localization project. Please read through this file carefully, and note the
- sections where you must implement functionality for your bot. 
- 
+ sections where you must implement functionality for your bot.
+
  You are allowed to change *any part of this file*, not only the sections marked
  ** TO DO **. You are also allowed to add functions as needed (which must also
- be added to the header file). However, *you must clearly document* where you 
+ be added to the header file). However, *you must clearly document* where you
  made changes so your work can be properly evaluated by the TA.
 
  NOTES on your implementation:
@@ -19,21 +19,21 @@
  * It must be free of memory management errors and memory leaks - you are expected
    to develop high wuality, clean code. Test your code extensively with valgrind,
    and make sure its memory management is clean.
- 
+
  In a nutshell, the starter code provides:
- 
- * Reading a map from an input image (in .ppm format). The map is bordered with red, 
+
+ * Reading a map from an input image (in .ppm format). The map is bordered with red,
    must have black streets with yellow intersections, and buildings must be either
    blue, green, or be left white (no building).
-   
+
  * Setting up an array with map information which contains, for each intersection,
    the colours of the buildings around it in ** CLOCKWISE ** order from the top-left.
-   
+
  * Initialization of the EV3 robot (opening a socket and setting up the communication
    between your laptop and your bot)
-   
+
  What you must implement:
- 
+
  * All aspects of robot control:
    - Finding and then following a street
    - Recognizing intersections
@@ -47,52 +47,149 @@
 
  * Basic robot exploration strategy so the robot can scan different intersections in
    a sequence that allows it to achieve reliable localization
-   
- * Basic path planning - once the robot has found its location, it must drive toward a 
+
+ * Basic path planning - once the robot has found its location, it must drive toward a
    user-specified position somewhere in the map.
 
  --- OPTIONALLY but strongly recommended ---
- 
+
   The starter code provides a skeleton for implementing a sensor calibration routine,
  it is called when the code receives -1  -1 as target coordinates. The goal of this
  function should be to gather informatin about what the sensor reads for different
  colours under the particular map/room illumination/battery level conditions you are
  working on - it's entirely up to you how you want to do this, but note that careful
  calibration would make your work much easier, by allowing your robot to more
- robustly (and with fewer mistakes) interpret the sensor data into colours. 
- 
+ robustly (and with fewer mistakes) interpret the sensor data into colours.
+
    --> The code will exit after calibration without running localization (no target!)
        SO - your calibration code must *save* the calibration information into a
             file, and you have to add code to main() to read and use this
             calibration data yourselves.
-   
+
  What you need to understand thoroughly in order to complete this project:
- 
+
  * The histogram localization method as discussed in lecture. The general steps of
    probabilistic robot localization.
 
  * Sensors and signal management - your colour readings will be noisy and unreliable,
    you have to handle this smartly
-   
+
  * Robot control with feedback - your robot does not perform exact motions, you can
    assume there will be error and drift, your code has to handle this.
-   
- * The robot control API you will use to get your robot to move, and to acquire 
+
+ * The robot control API you will use to get your robot to move, and to acquire
    sensor data. Please see the API directory and read through the header files and
    attached documentation
-   
+
  Starter code:
- F. Estrada, 2018 - for CSC C85 
- 
+ F. Estrada, 2018 - for CSC C85
+
 */
 
 #include "EV3_Localization.h"
+#include <stdio.h>
+#include <stdbool.h>
+
+#define NXT_COLOR_AMT 6 // Amount of colors the NXT sensor can detect.
+
+#define CALIB_FILENAME "calibration.txt"  // Calibration filename.
+#define CALIB_AMT 30                      // Amount of readings to take for a calibration.
+
+#define TURN_SPEED 10                     // Turn speed.
+#define LOC_CONFIDENCE_THRESHOLD 0.6      // Amount of confidence required to assume the robot's known location.
+
+/* Turn direction. */
+typedef enum {
+  NO_TURN = -1, 
+  RIGHT_TURN, 
+  LEFT_TURN
+} TURN_DIR;
+
+/* Move direction. */
+typedef enum {
+  UP_DIR, 
+  RIGHT_DIR, 
+  DOWN_DIR, 
+  LEFT_DIR
+} MOVE_DIR;
 
 int map[400][4];            // This holds the representation of the map, up to 20x20
                             // intersections, raster ordered, 4 building colours per
                             // intersection.
 int sx, sy;                 // Size of the map (number of intersections along x and y)
 double beliefs[400][4];     // Beliefs for each location and motion direction
+
+int calib_colors[NXT_COLOR_AMT][3]; // Calibrated color values.
+
+/*
+  Return the scanned color with the highest similarity 
+  after scanning `n` times.
+*/
+int get_closest_color(int n) {
+  int MSE       = INFINITY;
+  int MSE_index = -1;
+  double *avg_reading = read_sanitized_color(n);
+  for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
+    int SE = 0;
+    for (size_t j = 0; j < 3; j++) {
+      SE += pow(calib_colors[i][j] - avg_reading[j], 2);
+    }
+
+    if (SE < MSE) {
+      MSE = SE;
+      MSE_index = i;
+    }
+  }
+  free(avg_reading);
+
+  return MSE_index + 1; // +1, since color starts at 1.
+}
+
+/*
+  Returns the average color reading, after scanning `n` times.
+  The returned pointer must be freed by the caller.
+*/
+double *read_sanitized_color(int n) {
+  int sum_reading[3] = { 0, 0, 0 };
+  for (size_t j = 0; j < n; j++) {
+    /* Get color reading. */
+    int R, G, B, A;
+    if (BT_read_colour_RGBraw_NXT(PORT_2, &R, &G, &B, &A) == -1) {  // Invalid color reading.
+      j--;  // Try another reading.
+      continue;
+    }
+
+    sum_reading[0] += R;
+    sum_reading[1] += G;
+    sum_reading[2] += B;
+  }
+
+  /* Compute average. */
+  double *avg_reading = (double *) calloc(3, sizeof(double));
+  for (size_t i = 0; i < 3; i++) {
+    avg_reading[i] = sum_reading[i] / ((double) n);
+  }
+
+  return avg_reading;
+}
+
+/* 
+  Returns true, if there exists a location with belief high enough
+  to reasonably conclude the robot's location, returns false otherwise.
+*/
+bool location_known() {
+  for (int k = 0; k < 4; k++) {
+    for (int j = 0; j < sy; j++) {
+      for (int i = 0; i < sx; i++) {
+        if (beliefs[i + (j * sx)][k] >= LOC_CONFIDENCE_THRESHOLD) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
 
 int main(int argc, char *argv[])
 {
@@ -121,12 +218,30 @@ int main(int argc, char *argv[])
   exit(1);
  }
 
- /******************************************************************************************************************
-  * OPTIONAL TO DO: If you added code for sensor calibration, add just below this comment block any code needed to
-  *   read your calibration data for use in your localization code. Skip this if you are not using calibration
-  * ****************************************************************************************************************/
- 
- 
+  /******************************************************************************************************************
+   * OPTIONAL TO DO: If you added code for sensor calibration, add just below this comment block any code needed to
+   *   read your calibration data for use in your localization code. Skip this if you are not using calibration
+   * ****************************************************************************************************************/
+
+  FILE *f = fopen(CALIB_FILENAME, "r");
+  if (f == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\ncontinuing without it...");
+  } else {
+    int i = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+      int j = 0;
+      char *token = strtok(line, ",");
+      while (token) {
+        calib_colors[i][j] = atoi(token);
+        token = strtok(NULL, ",");
+        j++;
+      }
+      i++;
+    }
+    fclose(f);
+  }
+
  // Your code for reading any calibration information should not go below this line //
  
  map_image=readPPMimage(&mapname[0],&rx,&ry);
@@ -170,7 +285,7 @@ int main(int argc, char *argv[])
  }
 
  fprintf(stderr,"All set, ready to go!\n");
- 
+
 /*******************************************************************************************************************************
  *
  *  TO DO - Implement the main localization loop, this loop will have the robot explore the map, scanning intersections and
@@ -210,11 +325,17 @@ int main(int argc, char *argv[])
  // HERE - write code to call robot_localization() and go_to_target() as needed, any additional logic required to get the
  //        robot to complete its task should be here.
 
+  /* Placeholders. (Likely won't be used since we assume location is randomized.) */
+  int x = -1;
+  int y = -1;
+  int dir = -1;
+  robot_localization(&x, &y, &dir);
+  
 
- // Cleanup and exit - DO NOT WRITE ANY CODE BELOW THIS LINE
- BT_close();
- free(map_image);
- exit(0);
+  // Cleanup and exit - DO NOT WRITE ANY CODE BELOW THIS LINE
+  BT_close();
+  free(map_image);
+  exit(0);
 }
 
 int find_street(void)   
@@ -388,26 +509,58 @@ int go_to_target(int robot_x, int robot_y, int direction, int target_x, int targ
 
 void calibrate_sensor(void)
 {
- /*
-  * This function is called when the program is started with -1  -1 for the target location. 
-  *
-  * You DO NOT NEED TO IMPLEMENT ANYTHING HERE - but it is strongly recommended as good calibration will make sensor
-  * readings more reliable and will make your code more resistent to changes in illumination, map quality, or battery
-  * level.
-  * 
-  * The principle is - Your code should allow you to sample the different colours in the map, and store representative
-  * values that will help you figure out what colours the sensor is reading given the current conditions.
-  * 
-  * Inputs - None
-  * Return values - None - your code has to save the calibration information to a file, for later use (see in main())
-  * 
-  * How to do this part is up to you, but feel free to talk with your TA and instructor about it!
-  */   
+  /*
+   * This function is called when the program is started with -1  -1 for the target location.
+   *
+   * You DO NOT NEED TO IMPLEMENT ANYTHING HERE - but it is strongly recommended as good calibration will make sensor
+   * readings more reliable and will make your code more resistent to changes in illumination, map quality, or battery
+   * level.
+   *
+   * The principle is - Your code should allow you to sample the different colours in the map, and store representative
+   * values that will help you figure out what colours the sensor is reading given the current conditions.
+   *
+   * Inputs - None
+   * Return values - None - your code has to save the calibration information to a file, for later use (see in main())
+   *
+   * How to do this part is up to you, but feel free to talk with your TA and instructor about it!
+   */
 
   /************************************************************************************************************************
    *   OIPTIONAL TO DO  -   Complete this function
    ***********************************************************************************************************************/
-  fprintf(stderr,"Calibration function called!\n");  
+  fprintf(stderr,"Calibration function called!\n");
+  
+  /* 
+    WARNING: Old calibration file will be OVERWRITTEN. 
+
+    Make sure you don't need the old calibration values 
+    before calling this function!
+  */
+  
+  FILE *fp = fopen(CALIB_FILENAME, "w");
+  if (fp == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\nexiting...");
+    exit(1);
+  }
+
+  const char *colours[NXT_COLOR_AMT] = { "BLACK", 
+                                         "BLUE", 
+                                         "GREEN", 
+                                         "YELLOW", 
+                                         "RED", 
+                                         "WHITE" };
+  
+  for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
+    printf("Place the NXT sensor over the color: %s, then press any key to continue.", colours[i]);
+    getchar();
+
+    double *avg_reading = read_sanitized_color(CALIB_AMT);
+    fprintf(fp, "%f,%f,%f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
+    free(avg_reading);
+  }
+  printf("Calibration complete! Data saved to: %s\n", CALIB_FILENAME);
+
+  fclose(fp);
 }
 
 int parse_map(unsigned char *map_img, int rx, int ry)

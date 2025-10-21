@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
 // just uncomment your bot's hex key to compile for your bot, and comment the
 // other ones out.
 #ifndef HEXKEY
-#define HEXKEY "00:16:53:56:55:D9"  // <--- SET UP YOUR EV3's HEX ID here
+#define HEXKEY "00:16:53:56:4C:53"  // <--- SET UP YOUR EV3's HEX ID here
 #endif
 
   BT_open(HEXKEY);
