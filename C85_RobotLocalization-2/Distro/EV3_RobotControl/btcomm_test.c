@@ -284,7 +284,7 @@ int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left
     printf("PID: %.2f\n", PID);
     // if(speed - PID < -100) PID = 100 + speed;
     
-    leftPower = (int)PID*speed + ((PID*speed)/fabs(PID*speed))*50 + 20;
+    leftPower = (int)PID*speed + ((PID*speed)/fabs(PID*speed))*50 - ((PID*speed)/fabs(PID*speed))*20; //changed This            
     rightPower = -((int)PID*speed + ((PID*speed)/fabs(PID*speed))*50);
     BT_turn(motor_port_right, leftPower, motor_port_left, rightPower);
 
@@ -410,10 +410,10 @@ int main(int argc, char *argv[]) {
     int targetDegreeTurn = 90;
     int isOnRoad = 1;
 
-    RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+    //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
     RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegreeTurn, &angle);
     targetDegree = 90;
-    RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+    //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 
 
     // RR_straightLineMovement(speed, 50, MOTOR_A, MOTOR_D, &angle, targetDegree);
