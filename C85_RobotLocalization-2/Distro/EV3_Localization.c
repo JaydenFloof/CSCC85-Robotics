@@ -619,6 +619,7 @@ bool location_known() {
 */
 int RR_return_to_intersection(int speed, char motor_port_right, char motor_port_left, int *current_angle){
   const char *colour = get_finalized_color(5);
+  int wentDownRoad = -1;
   if(strcmp(colour, "RED") == 0){
     printf("RED DETECTED, REVERSING\n");
     // RR_adjust_angle(35, motor_port_right, motor_port_left, current_angle);
@@ -628,10 +629,19 @@ int RR_return_to_intersection(int speed, char motor_port_right, char motor_port_
     colour = get_finalized_color(5);
     int cardAngle = closest_cardinal_angle(*current_angle);
     while (colour != "YELLOW") {
-      RR_go_down_one_road(-speed, motor_port_right, motor_port_left, 200, current_angle, cardAngle);
+      wentDownRoad = RR_go_down_one_road(-speed, motor_port_right, motor_port_left, 200, current_angle, cardAngle);
       RR_adjust_street(45, motor_port_right, motor_port_left, current_angle);
       colour = get_finalized_color(5);
     }
+    if (wentDownRoad == 1){
+      for (int i=0; i<4; i++){
+        BT_turn(MOTOR_A, -50, MOTOR_D, -50);
+      }
+    }
+    
+    BT_all_stop(1);
+    cardAngle = closest_cardinal_angle(*current_angle);
+    RR_turn_down_one_road(1, motor_port_right, motor_port_left, cardAngle-90, current_angle);
     BT_all_stop(1);
     
     return 0;
