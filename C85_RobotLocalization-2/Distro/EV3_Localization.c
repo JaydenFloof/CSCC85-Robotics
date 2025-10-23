@@ -664,7 +664,7 @@ int main(int argc, char *argv[])
   int turn = 0;
   int wentDownRoad = -1;
 
-  BT_read_gyro(PORT_4, 0, &angle, &rate);
+  BT_read_gyro(PORT_4, 1, &angle, &rate);
 
   //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 
@@ -673,9 +673,11 @@ int main(int argc, char *argv[])
   while (true) {
     targetDegree = closest_cardinal_angle(angle);
     wentDownRoad = RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+    //DEMO TO SHOW
 
     //scan_intersection(&tl, &tr, &bl, &br, &angle);
     if (wentDownRoad == 0){
+      scan_intersection(&tl, &tr, &br, &bl, &angle);
       turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree + 90, &angle);
     }
     wentDownRoad = -1;
@@ -698,6 +700,7 @@ int main(int argc, char *argv[])
 
     //scan_intersection(&tl, &tr, &bl, &br, &angle);
     if (wentDownRoad == 0){
+      scan_intersection(&tl, &tr, &br, &bl, &angle);
       turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree - 90, &angle);
     }
     wentDownRoad = -1;
@@ -1336,28 +1339,28 @@ void calibrate_sensor(void)
     before calling this function!
   */
   
-  // FILE *fp = fopen(CALIB_FILENAME, "w");
-  // if (fp == NULL) {
-  //   perror("couldn't open" CALIB_FILENAME "\nexiting...");
-  //   exit(1);
-  // }
+  FILE *fp = fopen(CALIB_FILENAME, "w");
+  if (fp == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\nexiting...");
+    exit(1);
+  }
 
-  // const char *colours[NXT_COLOR_AMT] = { "BLACK", 
-  //                                        "BLUE", 
-  //                                        "GREEN", 
-  //                                        "YELLOW", 
-  //                                        "RED", 
-  //                                        "WHITE" };
+  const char *colours[NXT_COLOR_AMT] = { "BLACK", 
+                                         "BLUE", 
+                                         "GREEN", 
+                                         "YELLOW", 
+                                         "RED", 
+                                         "WHITE" };
   
-  // for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
-  //   printf("Place the NXT sensor over the color: %s, then press any key to continue.", colours[i]);
-  //   getchar();
+  for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
+    printf("Place the NXT sensor over the color: %s, then press any key to continue.", colours[i]);
+    getchar();
 
-  //   double *avg_reading = (double *) calloc(3, sizeof(double));
-  //   avg_reading = read_sanitized_color(CALIB_AMT);
-  //   fprintf(fp, "%f,%f,%f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
-  //   free(avg_reading);
-  // }
+    double *avg_reading = (double *) calloc(3, sizeof(double));
+    avg_reading = read_sanitized_color(CALIB_AMT);
+    fprintf(fp, "%f,%f,%f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
+    free(avg_reading);
+  }
   printf("Colour calibration complete! Data saved to: %s\n", CALIB_FILENAME);
   printf("Place the Gyro sensor facing True North, then press any key to continue.");
   getchar();
