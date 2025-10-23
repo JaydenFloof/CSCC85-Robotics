@@ -87,6 +87,7 @@
 */
 
 #include "EV3_Localization.h"
+#include "EV3_Belief.h"
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -98,21 +99,6 @@
 #define TURN_SPEED 10                     // Turn speed.
 #define LOC_CONFIDENCE_THRESHOLD 0.6      // Amount of confidence required to assume the robot's known location.
 
-/* Turn direction. */
-typedef enum {
-  NO_TURN = -1, 
-  RIGHT_TURN, 
-  LEFT_TURN
-} TURN_DIR;
-
-/* Move direction. */
-typedef enum {
-  UP_DIR, 
-  RIGHT_DIR, 
-  DOWN_DIR, 
-  LEFT_DIR
-} MOVE_DIR;
-
 int map[400][4];            // This holds the representation of the map, up to 20x20
                             // intersections, raster ordered, 4 building colours per
                             // intersection.
@@ -123,12 +109,12 @@ int calib_colors[NXT_COLOR_AMT][3]; // Calibrated color values.
 
 /*
   Return the scanned color with the highest similarity 
-  after scanning `n` times.
+  after scanning `scan_amt` times.
 */
-int get_closest_color(int n) {
+int get_closest_color(int scan_amt) {
   int MSE       = INFINITY;
   int MSE_index = -1;
-  double *avg_reading = read_sanitized_color(n);
+  double *avg_reading = read_sanitized_color(scan_amt);
   for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
     int SE = 0;
     for (size_t j = 0; j < 3; j++) {
@@ -146,12 +132,12 @@ int get_closest_color(int n) {
 }
 
 /*
-  Returns the average color reading, after scanning `n` times.
+  Returns the average color reading, after scanning `scan_amt` times.
   The returned pointer must be freed by the caller.
 */
-double *read_sanitized_color(int n) {
+double *read_sanitized_color(int scan_amt) {
   int sum_reading[3] = { 0, 0, 0 };
-  for (size_t j = 0; j < n; j++) {
+  for (size_t j = 0; j < scan_amt; j++) {
     /* Get color reading. */
     int R, G, B, A;
     if (BT_read_colour_RGBraw_NXT(PORT_2, &R, &G, &B, &A) == -1) {  // Invalid color reading.
@@ -167,7 +153,7 @@ double *read_sanitized_color(int n) {
   /* Compute average. */
   double *avg_reading = (double *) calloc(3, sizeof(double));
   for (size_t i = 0; i < 3; i++) {
-    avg_reading[i] = sum_reading[i] / ((double) n);
+    avg_reading[i] = sum_reading[i] / ((double) scan_amt);
   }
 
   return avg_reading;

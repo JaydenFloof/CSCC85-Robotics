@@ -72,6 +72,21 @@ code that you have to complete in order to implement the localization algorithms
 	#define HEXKEY "00:16:53:56:4C:53"	// <--- SET UP YOUR EV3's HEX ID here
 #endif
 
+/* Turn direction. */
+typedef enum {
+  NO_TURN = -1, 
+  RIGHT_TURN, 
+  LEFT_TURN
+} TURN_DIR;
+
+/* Move direction. */
+typedef enum {
+  UP_DIR, 
+  RIGHT_DIR, 
+  DOWN_DIR, 
+  LEFT_DIR
+} MOVE_DIR;
+
 int parse_map(unsigned char *map_img, int rx, int ry);
 int robot_localization(int *robot_x, int *robot_y, int *direction);
 int go_to_target(int robot_x, int robot_y, int direction, int target_x, int target_y);
@@ -82,7 +97,7 @@ int turn_at_intersection(int turn_direction);
 void calibrate_sensor(void);
 unsigned char *readPPMimage(const char *filename, int *rx, int*ry);
 
-int get_closest_color(int n);
-double *read_sanitized_color(int n);
+int get_closest_color(int scan_amt);
+double *read_sanitized_color(int scan_amt);
 
 #endif
