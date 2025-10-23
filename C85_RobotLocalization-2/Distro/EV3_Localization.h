@@ -83,6 +83,8 @@ void calibrate_sensor(void);
 unsigned char *readPPMimage(const char *filename, int *rx, int*ry);
 
 int get_closest_color(int n);
+int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int *angle, int targetDegree);
+int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left, int targetDegree, int *angle);
 double *read_sanitized_color(int n);
 const char *get_finalized_color(int n);
 int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle);

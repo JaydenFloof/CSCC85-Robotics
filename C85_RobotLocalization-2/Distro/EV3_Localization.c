@@ -765,7 +765,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   //Scan tl and tr
   BT_turn(MOTOR_A, -100, MOTOR_D, -100); //Move Back
 
-  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tr
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan br
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
     colour = get_finalized_color(3);
   }
@@ -777,7 +777,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
     colour = get_finalized_color(3);
   }
-  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // go back to road
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan bl
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
     colour = get_finalized_color(3);
   }
@@ -789,8 +789,12 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
     colour = get_finalized_color(3);
   }
   RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle);
-  BT_turn(MOTOR_A, 80, MOTOR_D, 80); //Move Backwards
-  BT_turn(MOTOR_A, 80, MOTOR_D, 80); //Move Backwards
+  RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 20, angle, *angle);
+
+  RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle);
+  BT_turn(MOTOR_A, 100, MOTOR_D, 100); //Move Forward
+
+  scan TR and TL
   while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tr
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
     colour = get_finalized_color(3);
@@ -802,7 +806,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
     colour = get_finalized_color(3);
   }
-  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // go back to road
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tl
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
     colour = get_finalized_color(3);
   }
@@ -813,7 +817,9 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
     colour = get_finalized_color(3);
   }
+
   RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle);
+  RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 20, angle, *angle);
   
  return(0);
  
