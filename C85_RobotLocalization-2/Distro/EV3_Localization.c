@@ -710,7 +710,6 @@ int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int 
     return 0;
 }
 
-
 /* 
   Keeps the robot roughly aligned with the road by making small adjustments based on 
   colour and gyro readings
@@ -744,7 +743,7 @@ int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int
         //angle = closest_cardinal_angle(*current_angle);
         printf("current angles STREET %d with target %d\n", *current_angle, angle);
 
-        if(*current_angle - angle > 0){
+        if(fabs(angle) - fabs(*current_angle) > 0){
           // left
           direction = -1;
           colour = get_finalized_color(3);
@@ -925,6 +924,7 @@ int main(int argc, char *argv[])
 
     //scan_intersection(&tl, &tr, &bl, &br, &angle);
     if (wentDownRoad == 0){
+      scan_intersection(&tl,&tr,&br,&bl, &angle);
       turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree + 90, &angle);
     }
     wentDownRoad = -1;
@@ -948,6 +948,7 @@ int main(int argc, char *argv[])
     //scan_intersection(&tl, &tr, &bl, &br, &angle);
     if (wentDownRoad == 0){
       turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree - 90, &angle);
+      scan_intersection(&tl,&tr,&br,&bl, &angle);
     }
     wentDownRoad = -1;
     BT_read_gyro(PORT_4, 0, &angle, &rate);
