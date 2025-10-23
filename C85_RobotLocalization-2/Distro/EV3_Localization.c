@@ -215,18 +215,16 @@ int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left
   int leftPower;
   int rightPower;
   int i = 0;
-  char colour[8];
+  const char *colour;
 
-  int indexColour = get_closest_color(3);
-  if (indexColour == 0)
-    strcpy(colour, "UNKNOWN");
-  else
-    strcpy(colour, colours[indexColour-1]); // -1 since colors start at 1.
+  colour = get_finalized_color(5);
 
   if (strcmp(colour, "YELLOW") != 0){
     printf("Colour sensor reading Not Yellow\n");
     return -1;
   }
+
+  printf("\n\nCOLOUR YELLOWwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww, TURNING\n\n");
 
 
   //BT_read_gyro(PORT_4, 1, &angle, &rate);
@@ -255,7 +253,7 @@ int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left
 
     // if(speed - PID < -100) PID = 100 + speed;
     
-if (targetDegree > 0) {
+    if (targetDegree > 0) {
       leftPower = (int)PID*speed + (((int)PID*speed)/fabs((int)PID*speed))*55 - (((int)PID*speed)/fabs((int)PID*speed))*25;           
       rightPower = -((int)PID*speed + ((PID*speed)/fabs(PID*speed))*65);
     }
@@ -666,7 +664,7 @@ int main(int argc, char *argv[])
   int turn = 0;
   int wentDownRoad = -1;
 
-  BT_read_gyro(PORT_4, 1, &angle, &rate);
+  BT_read_gyro(PORT_4, 0, &angle, &rate);
 
   //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 

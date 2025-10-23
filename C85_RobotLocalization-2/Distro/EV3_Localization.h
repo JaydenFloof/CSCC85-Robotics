@@ -87,7 +87,7 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, 
 int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left, int targetDegree, int *angle);
 double *read_sanitized_color(int n);
 const char *get_finalized_color(int n);
-int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle);
+int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle, int custom);
 int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int *current_angle);
 int closest_cardinal_angle(int angle);
 int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int *angle, int targetDegree);
