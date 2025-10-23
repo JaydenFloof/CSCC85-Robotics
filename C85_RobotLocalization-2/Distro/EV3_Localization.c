@@ -130,6 +130,8 @@ const char *colours[NXT_COLOR_AMT] = { "BLACK",
                                          "RED", 
                                          "WHITE" };
 
+int global_angle = 0;
+
 int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int *angle, int targetDegree){
   int r;
   int g;
@@ -414,7 +416,7 @@ int RR_return_to_intersection(int speed, char motor_port_right, char motor_port_
 /* 
   Will adjust the robot to a certain desired angle irrespective of current street (assuming the bot is already on the road)
 */
-int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle) {
+int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle, int custom) {
     printf("\nadjusting ONLY angle\n");
     BT_all_stop(1);
     const char* colour = get_finalized_color(3);
@@ -428,8 +430,14 @@ int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int 
     BT_all_stop(1);
 
     BT_read_gyro(PORT_4, 0 , current_angle, &rate);
-    angle = closest_cardinal_angle(*current_angle);
+
+    angle = custom;
+
+    if(custom == -1){
+      angle = closest_cardinal_angle(*current_angle);
     printf("current angle %d with target %d\n", *current_angle, angle);
+    }
+    
 
     if(*current_angle - angle > 0){
       // left
@@ -440,7 +448,7 @@ int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int 
           BT_all_stop(1);
           break;
         }
-        BT_turn(motor_port_left, -speed, motor_port_right, speed);
+        BT_turn(motor_port_left, -speed-15, motor_port_right, speed+15);
         BT_read_gyro(PORT_4, 0 , current_angle, &rate);
       }
       BT_all_stop(1);
@@ -455,7 +463,7 @@ int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int 
           BT_all_stop(1);
           break;
         }
-        BT_turn(motor_port_left, speed, motor_port_right, -speed);
+        BT_turn(motor_port_left, speed+15, motor_port_right, -speed-15);
         BT_read_gyro(PORT_4, 0 , current_angle, &rate);
       }
       BT_all_stop(1);
@@ -543,15 +551,6 @@ int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int
     return 0;
 }
 
-
-
-
-
-/* 
-  Makes robot go down straight line with basic PID control to stay on road
-*/
-
-
 int main(int argc, char *argv[])
 {
  char mapname[1024];
@@ -628,7 +627,7 @@ int main(int argc, char *argv[])
   int targetDegree = 0;
   int targetDegreeTurn = 90;
   int rate = 0;
-  int speed = 35;
+  int speed = 40;
   int tl, tr, bl, br;
   int i = 0;
   int add = 0;
@@ -709,7 +708,35 @@ int main(int argc, char *argv[])
   
  }
 
- 
+if (dest_x==-4 && dest_y==-4) {
+  BT_open(HEXKEY);
+    FILE *f = fopen(CALIB_FILENAME, "r");
+  if (f == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\ncontinuing without it...");
+  } else {
+    int i = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+      int j = 0;
+      char *token = strtok(line, ",");
+      while (token) {
+        calib_colors[i][j] = atof(token);
+        token = strtok(NULL, ",");
+        j++;
+      }
+      i++;
+    }
+    fclose(f);
+  }
+
+  int angle = 0, rate = 0;
+  BT_read_gyro(PORT_4, 0, &angle, &rate);
+
+  find_street(&angle, 40);
+  RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 200, &angle, closest_cardinal_angle(angle));
+  BT_all_stop(1);
+  exit(1);
+}
 
   /******************************************************************************************************************
    * OPTIONAL TO DO: If you added code for sensor calibration, add just below this comment block any code needed to
@@ -831,7 +858,7 @@ int main(int argc, char *argv[])
   exit(0);
 }
 
-int find_street(void)   
+int find_street(int *angle, int speed)  
 {
  /*
   * This function gets your robot onto a street, wherever it is placed on the map. You can do this in many ways, but think
@@ -841,8 +868,59 @@ int find_street(void)
   * bot after calling this function
   */
 
-  return(0);
+  const char *colour = get_finalized_color(3);
+  int rate = 0;
+
+  while(strcmp(colour, "BLACK") != 0 && strcmp(colour, "YELLOW") != 0){
+    BT_turn(MOTOR_A, speed, MOTOR_D, speed);
+    colour = get_finalized_color(3);
+  }
+
+  printf("\nONM BLACK\n");
+
+  RR_adjust_angle(35, MOTOR_A, MOTOR_D, angle, -1);
+
+  printf("\nadjusted angle to gthing %d and %d\n", *angle, closest_cardinal_angle(*angle));
+
+  for(int i=0; i<10; i++){
+    BT_turn(MOTOR_A, 25, MOTOR_D, 25);
+    colour = get_finalized_color(3);
+    if(strcmp(colour, "BLACK") != 0){
+      printf("\nread not black,breack\n");
+      break;
+    }
+  }
+
+  BT_all_stop(1);
+  colour = get_finalized_color(3);
+
+  if(strcmp(colour, "BLACK") != 0 && strcmp(colour, "YELLOW") != 0){
+    // for(int i=0; i<5; i++){
+    //   BT_turn(MOTOR_A, -35, MOTOR_D, -35);
+    // }
+
+    while(strcmp(colour, "BLACK") != 0 && strcmp(colour, "YELLOW") != 0){
+      printf("getting back to black \n");
+      BT_turn(MOTOR_A, -speed, MOTOR_D, speed);
+      colour = get_finalized_color(3);
+  }
+    BT_all_stop(1);
+    BT_read_gyro(PORT_4, 0, angle, &rate);
+    
+    printf("angle cur has %d\n", *angle);    
+
+    RR_adjust_angle(40, MOTOR_A, MOTOR_D, angle, *angle + 45);
+    printf("\n\n finsihed getting to custom angle %d\n\n", *angle);
+    RR_adjust_street(40, MOTOR_A, MOTOR_D, angle);
+    printf("\nFInisheda djust streeet with %d \n", *angle);
+    RR_adjust_angle(40, MOTOR_A, MOTOR_D, angle, *angle + 20);
+    // RR_adjust_street(40, MOTOR_A, MOTOR_D, angle);
+
+    return 0;
+  }
+  return 0;
 }
+
 
 int drive_along_street(void)
 {
@@ -944,7 +1022,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   }
   BT_all_stop(1);
 
-  RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle);
+  RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle, -1);
   //RR_adjust_street(50,MOTOR_A, MOTOR_D, angle);
   RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 200, angle, *angle);
   for(int i=0; i<6; i++){
@@ -982,7 +1060,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   }
   BT_all_stop(1);
 
-  RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle);
+  RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle, -1);
   //RR_adjust_street(50,MOTOR_A, MOTOR_D, angle);
   RR_go_down_one_road(-40, MOTOR_A, MOTOR_D, 200, angle, *angle);
   
@@ -1072,12 +1150,85 @@ int robot_localization(int *robot_x, int *robot_y, int *direction)
    *   TO DO  -   Complete this function
    ***********************************************************************************************************************/
 
- // Return an invalid location/direction and notify that localization was unsuccessful (you will delete this and replace it
- // with your code).
- *(robot_x)=-1;
- *(robot_y)=-1;
- *(direction)=-1;
- return(0);
+    // printf("Starting robot localization...\n");
+
+    // int localized = 0;
+    // int corner_readings[4];   // top-left, top-right, bottom-right, bottom-left
+    // int action = UP_DIR;      // assume initial facing direction
+    // int step = 0;
+    // int angle = 0, rate = 0;
+    // BT_read_gyro(PORT_4, 1, &angle, &rate);
+
+    // // === 1. Get onto a street ===
+    // printf("Finding street...\n");
+    // find_street(&angle, 40);  // aligns robot with a street (speed 40)
+
+    // // === 2. Initialize beliefs uniformly ===
+    // for (int k = 0; k < 4; k++) {
+    //     for (int j = 0; j < sy; j++) {
+    //         for (int i = 0; i < sx; i++) {
+    //             beliefs[i + (j * sx)][k] = 1.0 / (sx * sy * 4);
+    //         }
+    //     }
+    // }
+    // normalize_beliefs();
+    // printf("Initial uniform belief distribution created.\n");
+
+    // // === 3. Localization loop ===
+    // while (!localized)
+    // {
+    //     printf("\n--- Step %d ---\n", step++);
+
+    //     // (a) Move physically to the next intersection
+    //     drive_along_street();
+    //     BT_all_stop(1);
+
+    //     // (b) Sense environment
+    //     printf("Scanning intersection...\n");
+    //     scan_intersection(&corner_readings[0], &corner_readings[1], &corner_readings[2], &corner_readings[3], &angle);
+
+    //     // (c) Update beliefs using Bayesian filter
+    //     printf("Updating beliefs...\n");
+    //     update_beliefs(action, corner_readings);
+
+    //     // (d) Check if robot is localized
+    //     double max_belief = 0.0;
+    //     int best_i = -1, best_j = -1, best_dir = -1;
+
+    //     for (int k = 0; k < 4; k++) {
+    //         for (int j = 0; j < sy; j++) {
+    //             for (int i = 0; i < sx; i++) {
+    //                 double b = beliefs[i + (j * sx)][k];
+    //                 if (b > max_belief) {
+    //                     max_belief = b;
+    //                     best_i = i;
+    //                     best_j = j;
+    //                     best_dir = k;
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     printf("Highest belief: %.3f at (%d, %d), dir=%d\n", max_belief, best_i, best_j, best_dir);
+
+    //     // (e) Decide if localization confidence is high enough
+    //     if (max_belief > 0.60) {   // threshold can be tuned
+    //         localized = 1;
+    //         *robot_x = best_i;
+    //         *robot_y = best_j;
+    //         *direction = best_dir;
+    //         printf("Robot localized with high confidence!\n");
+    //         break;
+    //     }
+
+    //     // (f) Otherwise, explore further — pick a turn direction and continue
+    //     printf("Not confident yet, turning and exploring...\n");
+    //     turn_at_intersection(RIGHT_TURN);   // example: always turn right for exploration
+    //     action = RIGHT_DIR;
+    // }
+
+    // printf("Localization complete.\n");
+    return 0;
 }
 
 int go_to_target(int robot_x, int robot_y, int direction, int target_x, int target_y)
@@ -1102,8 +1253,9 @@ int go_to_target(int robot_x, int robot_y, int direction, int target_x, int targ
   /************************************************************************************************************************
    *   TO DO  -   Complete this function
    ***********************************************************************************************************************/
-  return(0);  
+  return 0;
 }
+
 
 void calibrate_sensor(void)
 {
@@ -1137,31 +1289,37 @@ void calibrate_sensor(void)
     before calling this function!
   */
   
-  FILE *fp = fopen(CALIB_FILENAME, "w");
-  if (fp == NULL) {
-    perror("couldn't open" CALIB_FILENAME "\nexiting...");
-    exit(1);
-  }
+  // FILE *fp = fopen(CALIB_FILENAME, "w");
+  // if (fp == NULL) {
+  //   perror("couldn't open" CALIB_FILENAME "\nexiting...");
+  //   exit(1);
+  // }
 
-  const char *colours[NXT_COLOR_AMT] = { "BLACK", 
-                                         "BLUE", 
-                                         "GREEN", 
-                                         "YELLOW", 
-                                         "RED", 
-                                         "WHITE" };
+  // const char *colours[NXT_COLOR_AMT] = { "BLACK", 
+  //                                        "BLUE", 
+  //                                        "GREEN", 
+  //                                        "YELLOW", 
+  //                                        "RED", 
+  //                                        "WHITE" };
   
-  for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
-    printf("Place the NXT sensor over the color: %s, then press any key to continue.", colours[i]);
-    getchar();
+  // for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
+  //   printf("Place the NXT sensor over the color: %s, then press any key to continue.", colours[i]);
+  //   getchar();
 
-    double *avg_reading = (double *) calloc(3, sizeof(double));
-    avg_reading = read_sanitized_color(CALIB_AMT);
-    fprintf(fp, "%f,%f,%f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
-    free(avg_reading);
-  }
-  printf("Calibration complete! Data saved to: %s\n", CALIB_FILENAME);
+  //   double *avg_reading = (double *) calloc(3, sizeof(double));
+  //   avg_reading = read_sanitized_color(CALIB_AMT);
+  //   fprintf(fp, "%f,%f,%f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
+  //   free(avg_reading);
+  // }
+  printf("Colour calibration complete! Data saved to: %s\n", CALIB_FILENAME);
+  printf("Place the Gyro sensor facing True North, then press any key to continue.");
+  getchar();
 
-  fclose(fp);
+  int rate = 0;
+  BT_read_gyro(PORT_4, 1, &global_angle, &rate);
+
+
+  // fclose(fp);
 }
 
 int parse_map(unsigned char *map_img, int rx, int ry)

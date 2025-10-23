@@ -75,7 +75,7 @@ code that you have to complete in order to implement the localization algorithms
 int parse_map(unsigned char *map_img, int rx, int ry);
 int robot_localization(int *robot_x, int *robot_y, int *direction);
 int go_to_target(int robot_x, int robot_y, int direction, int target_x, int target_y);
-int find_street(void);
+int find_street(int *angle, int speed);
 int drive_along_street(void);
 int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle);
 int turn_at_intersection(int turn_direction);
