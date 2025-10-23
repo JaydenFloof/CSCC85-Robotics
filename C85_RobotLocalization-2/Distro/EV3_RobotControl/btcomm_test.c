@@ -411,7 +411,7 @@ int main(int argc, char *argv[]) {
     int isOnRoad = 1;
 
     //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
-    RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegreeTurn, &angle);
+     
     targetDegree = 90;
     //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 

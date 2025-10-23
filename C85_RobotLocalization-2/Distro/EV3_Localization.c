@@ -1,14 +1,14 @@
 /*
 
   CSC C85 - Embedded Systems - Project # 1 - EV3 Robot Localization
-  
+
  This file provides the implementation of all the functionality required for the EV3
  robot localization project. Please read through this file carefully, and note the
- sections where you must implement functionality for your bot. 
- 
+ sections where you must implement functionality for your bot.
+
  You are allowed to change *any part of this file*, not only the sections marked
  ** TO DO **. You are also allowed to add functions as needed (which must also
- be added to the header file). However, *you must clearly document* where you 
+ be added to the header file). However, *you must clearly document* where you
  made changes so your work can be properly evaluated by the TA.
 
  NOTES on your implementation:
@@ -19,21 +19,21 @@
  * It must be free of memory management errors and memory leaks - you are expected
    to develop high wuality, clean code. Test your code extensively with valgrind,
    and make sure its memory management is clean.
- 
+
  In a nutshell, the starter code provides:
- 
- * Reading a map from an input image (in .ppm format). The map is bordered with red, 
+
+ * Reading a map from an input image (in .ppm format). The map is bordered with red,
    must have black streets with yellow intersections, and buildings must be either
    blue, green, or be left white (no building).
-   
+
  * Setting up an array with map information which contains, for each intersection,
    the colours of the buildings around it in ** CLOCKWISE ** order from the top-left.
-   
+
  * Initialization of the EV3 robot (opening a socket and setting up the communication
    between your laptop and your bot)
-   
+
  What you must implement:
- 
+
  * All aspects of robot control:
    - Finding and then following a street
    - Recognizing intersections
@@ -47,52 +47,423 @@
 
  * Basic robot exploration strategy so the robot can scan different intersections in
    a sequence that allows it to achieve reliable localization
-   
- * Basic path planning - once the robot has found its location, it must drive toward a 
+
+ * Basic path planning - once the robot has found its location, it must drive toward a
    user-specified position somewhere in the map.
 
  --- OPTIONALLY but strongly recommended ---
- 
+
   The starter code provides a skeleton for implementing a sensor calibration routine,
  it is called when the code receives -1  -1 as target coordinates. The goal of this
  function should be to gather informatin about what the sensor reads for different
  colours under the particular map/room illumination/battery level conditions you are
  working on - it's entirely up to you how you want to do this, but note that careful
  calibration would make your work much easier, by allowing your robot to more
- robustly (and with fewer mistakes) interpret the sensor data into colours. 
- 
+ robustly (and with fewer mistakes) interpret the sensor data into colours.
+
    --> The code will exit after calibration without running localization (no target!)
        SO - your calibration code must *save* the calibration information into a
             file, and you have to add code to main() to read and use this
             calibration data yourselves.
-   
+
  What you need to understand thoroughly in order to complete this project:
- 
+
  * The histogram localization method as discussed in lecture. The general steps of
    probabilistic robot localization.
 
  * Sensors and signal management - your colour readings will be noisy and unreliable,
    you have to handle this smartly
-   
+
  * Robot control with feedback - your robot does not perform exact motions, you can
    assume there will be error and drift, your code has to handle this.
-   
- * The robot control API you will use to get your robot to move, and to acquire 
+
+ * The robot control API you will use to get your robot to move, and to acquire
    sensor data. Please see the API directory and read through the header files and
    attached documentation
-   
+
  Starter code:
- F. Estrada, 2018 - for CSC C85 
- 
+ F. Estrada, 2018 - for CSC C85
+
 */
 
 #include "EV3_Localization.h"
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+#include <unistd.h>
+
+#define NXT_COLOR_AMT 6 // Amount of colors the NXT sensor can detect.
+
+#define CALIB_FILENAME "calibration.txt"  // Calibration filename.
+#define CALIB_AMT 30                      // Amount of readings to take for a calibration.
+
+#define TURN_SPEED 10                     // Turn speed.
+#define LOC_CONFIDENCE_THRESHOLD 0.6      // Amount of confidence required to assume the robot's known location.
+
+/* Turn direction. */
+typedef enum {
+  NO_TURN = -1, 
+  RIGHT_TURN, 
+  LEFT_TURN
+} TURN_DIR;
+
+/* Move direction. */
+typedef enum {
+  UP_DIR, 
+  RIGHT_DIR, 
+  DOWN_DIR, 
+  LEFT_DIR
+} MOVE_DIR;
 
 int map[400][4];            // This holds the representation of the map, up to 20x20
                             // intersections, raster ordered, 4 building colours per
                             // intersection.
 int sx, sy;                 // Size of the map (number of intersections along x and y)
 double beliefs[400][4];     // Beliefs for each location and motion direction
+
+int calib_colors[NXT_COLOR_AMT][3]; // Calibrated color values.
+
+const char *colours[NXT_COLOR_AMT] = { "BLACK", 
+                                         "BLUE", 
+                                         "GREEN", 
+                                         "YELLOW", 
+                                         "RED", 
+                                         "WHITE" };
+
+int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int *angle, int targetDegree){
+  int r;
+  int g;
+  int b;
+  int a;
+  char colour[8];
+  //int distance = 10;
+  //BT_read_colour_RGBraw_NXT(PORT_2, &r, &g, &b, &a);
+  int indexColour = get_closest_color(3);
+  if (indexColour == 0)
+    strcpy(colour, "UNKNOWN");
+  else
+    strcpy(colour, colours[indexColour-1]); // -1 since colors start at 1.
+  printf("Colour sensor reading: Colour=%s\n", colour);
+
+  //int angle = 0;
+  int rate;
+  double kp = 1;
+  double ki = 0.01;
+  double kd = 0.05;
+  int t = 0;
+  double integralErr = 0.0;
+  double derivativeErr = 0.0;
+  double errArray[maxDistance];
+  double PID;
+  //BT_read_gyro(PORT_4, 1, &angle, &rate);
+  while (t < maxDistance && (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0)) {
+    BT_read_gyro(PORT_4, 0, angle, &rate);
+    errArray[t] = *angle - targetDegree;
+    //integralErr += fabs(errArray[t]);
+    if (t < 5)
+      integralErr += fabs(errArray[t]);
+    else
+      //shift_left_add(errArray, 5, angle);
+      integralErr = integralErr - fabs(errArray[t-4]) + fabs(errArray[t]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+    if (t > 0)
+      derivativeErr = errArray[t-1] - errArray[t];
+    else
+      derivativeErr = 0.0;
+    PID = kp*errArray[t] + ki*integralErr + kd*derivativeErr;
+    printf("t=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", t, errArray[t], integralErr, derivativeErr, PID);
+    if (PID + speed > 50) PID = 50 - speed;
+    BT_turn(motor_port_right, speed + (int)PID, motor_port_left, speed - (int)PID);
+
+    int indexColour = get_closest_color(3);
+    if (indexColour == 0)
+      strcpy(colour, "UNKNOWN");
+    else
+      strcpy(colour, colours[indexColour-1]); // -1 since colors start at 1.
+    printf("Colour sensor reading: Colour=%s\n", colour);
+    //RR_straightLineMovement(speed, distance, motor_port_right, motor_port_left);
+    t += 1;
+  }
+  BT_all_stop(1);
+  return 0;
+}
+
+int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left, int targetDegree, int *angle){
+
+  //int angle = 0;
+  int rate;
+  double kp = 0.25
+  ;
+  double ki = 0.01;
+  double kd = 0.05;
+  //int t = 0;
+  double integralErr = 0.0;
+  double derivativeErr = 0.0;
+  double errArray[250];
+  double PID = -1000;
+  int leftPower;
+  int rightPower;
+  int i = 0;
+  char colour[8];
+
+  int indexColour = get_closest_color(3);
+  if (indexColour == 0)
+    strcpy(colour, "UNKNOWN");
+  else
+    strcpy(colour, colours[indexColour-1]); // -1 since colors start at 1.
+
+  if (strcmp(colour, "YELLOW") != 0){
+    printf("Colour sensor reading Not Yellow\n");
+    return -1;
+  }
+
+
+  //BT_read_gyro(PORT_4, 1, &angle, &rate);
+  while (fabs(PID) > 1) {
+    if (PID == -1000) {
+      PID = -(*angle)/fabs(*angle);
+    }
+    BT_read_gyro(PORT_4, 0, angle, &rate);
+    errArray[i] = *angle - targetDegree;
+    //integralErr += fabs(errArray[t]);
+    if (i < 5)
+      integralErr += fabs(errArray[i]);
+    else
+      //shift_left_add(errArray, 5, angle);
+      integralErr = integralErr - fabs(errArray[i-4]) + fabs(errArray[i]);
+      //integralErr = fabs(errArray[0]) + fabs(errArray[1]) + fabs(errArray[2]) + fabs(errArray[3]) + fabs(errArray[4]);
+    if (i > 0)
+      derivativeErr = errArray[i-1] - errArray[i];
+    else
+      derivativeErr = 0.0;
+    
+    if (fabs(speed * PID) > 50) {
+        PID = (PID > 0) ? 50/speed : -50/speed;
+        printf("Clamped PID: %.2f\n", PID);
+    }
+    printf("PID: %.2f\n", PID);
+    // if(speed - PID < -100) PID = 100 + speed;
+    
+    leftPower = (int)PID*speed + ((PID*speed)/fabs(PID*speed))*60 - ((PID*speed)/fabs(PID*speed))*25; //changed This            
+    rightPower = -((int)PID*speed + ((PID*speed)/fabs(PID*speed))*60);
+    BT_turn(motor_port_right, leftPower, motor_port_left, rightPower);
+
+    printf("Turning with speed %d and %d\n", leftPower , rightPower);
+    PID = kp*errArray[i] + ki*integralErr + kd*derivativeErr;
+    printf("i=%d, err=%.2f, integralErr=%.2f, derivativeErr=%.2f, PID=%.2f\n", i, errArray[i], integralErr, derivativeErr, PID);
+    i += 1;
+  }
+
+  BT_all_stop(1);
+  return 0;
+}
+
+
+//Get closest cardinal angele from current angle
+int closest_cardinal_angle(int angle) {
+    // Compute remainder relative to 90
+    int remainder = angle % 90;
+
+    if (angle >= 0) {
+        if (remainder >= 45)
+            angle += (90 - remainder);   // round up
+        else
+            angle -= remainder;          // round down
+    } 
+
+    else {
+        if (remainder <= -45)
+            angle -= (90 + remainder);   // round down (more negative)
+        else
+            angle -= remainder;          // round up (toward zero)
+    }
+
+    printf("\nCLOSEST CARDINAL ANGLE IS %d\n", angle);
+    return angle;
+}
+
+
+/*
+  Return the scanned color with the highest similarity 
+  after scanning `n` times.
+*/
+int get_closest_color(int n) {
+  double MSE = 100000;
+  int MSE_index = -1;
+  double *avg_reading = read_sanitized_color(n);
+  for (int i = 0; i < NXT_COLOR_AMT; i++) {
+    int SE = 0;
+    for (int j = 0; j < 3; j++) {
+      SE += pow(calib_colors[i][j] - avg_reading[j], 2);
+    }
+
+    // printf("get colour %d: SE = %d, MSE = %f\n", i + 1, SE, MSE);
+
+    if (SE < MSE) {
+      MSE = SE;
+      MSE_index = i;
+    }
+    // printf("index is %d\n", MSE_index);
+  }
+  // free(avg_reading);
+
+  if(MSE_index == 2){
+    // printf("GREEN detected with avg R: %.2f, G: %.2f, B: %.2f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
+    if(avg_reading[0] > avg_reading[1]){
+      MSE_index = 0; 
+    }
+  }
+
+  // printf("returning\n");
+  return MSE_index + 1; // +1, since color starts at 1.
+}
+
+/*
+  Returns the average color reading, after scanning `n` times.
+  The returned pointer must be freed by the caller.
+*/
+double *read_sanitized_color(int n) {
+  int sum_reading[3] = { 0, 0, 0 };
+  for (size_t j = 0; j < n; j++) {
+    /* Get color reading. */
+    int R, G, B, A;
+    if (BT_read_colour_RGBraw_NXT(PORT_2, &R, &G, &B, &A) == -1) {  // Invalid color reading.
+      j--;  // Try another reading.
+      continue;
+    }
+
+    // printf("R: %d, G: %d, B: %d, A: %d\n", R, G, B, A);
+
+    sum_reading[0] += R;
+    sum_reading[1] += G;
+    sum_reading[2] += B;
+  }
+
+  /* Compute average. */
+  double *avg_reading = (double *) calloc(3, sizeof(double));
+  for (size_t i = 0; i < 3; i++) {
+    avg_reading[i] = sum_reading[i] / ((double) n);
+  }
+
+  // printf("returning avg R: %.2f, G: %.2f, B: %.2f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
+
+  return avg_reading;
+}
+
+/* 
+  Returns true, if there exists a location with belief high enough
+  to reasonably conclude the robot's location, returns false otherwise.
+*/
+bool location_known() {
+  for (int k = 0; k < 4; k++) {
+    for (int j = 0; j < sy; j++) {
+      for (int i = 0; i < sx; i++) {
+        if (beliefs[i + (j * sx)][k] >= LOC_CONFIDENCE_THRESHOLD) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle) {
+    printf("\nADJUSTING\n");
+    BT_all_stop(1);
+    const char* colour = get_finalized_color(3);
+    int direction = 0; // -1 for left, 1 for right
+    int cond = 0;
+    int allowance = 3; // degrees of allowance
+
+    // If we are already on the road, nothing to do
+    if (strcmp("BLACK", colour) == 0 || strcmp("YELLOW", colour) == 0){
+      BT_all_stop(1);
+      cond = 1;
+    }
+
+    printf("[RR_adjust_angle] Starting correction. Off-road colour=%s and %d\n", colour, strcmp("YELLOW", colour));
+
+    int angle = 0, rate = 0;
+
+    while (strcmp("BLACK", colour) != 0 && strcmp("YELLOW", colour) != 0) {
+      if(cond){
+        break;
+      }
+        // for(int i = 0; i < 2; ++i){
+        //   BT_turn(motor_port_left, -speed*1.1, motor_port_right, -speed*1.1);
+        // }
+
+        BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+        angle = closest_cardinal_angle(*current_angle);
+        printf("current angleis %d with target %d\n", *current_angle, angle);
+
+        if(*current_angle - angle > 0){
+          // left
+          direction = -1;
+
+          while (fabs(*current_angle - angle) > allowance){
+            printf("iterating FIRST loop %d going to %d\n", *current_angle, angle);
+            BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+            BT_turn(motor_port_left, -speed*1.2, motor_port_right, speed*1.2);
+          }
+        }
+        else{
+          // right
+          direction = 1;
+
+          while (fabs(*current_angle - angle) > allowance){
+            printf("iterating FIRST loop %d going to %d\n", *current_angle, angle);
+            BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+            BT_turn(motor_port_left, speed*1.2, motor_port_right, -speed*1.2);
+          }
+        }
+
+        colour = get_finalized_color(3);
+        printf("[RR_adjust_angle] Colour after turn: %s\n", colour);
+    }
+
+    BT_all_stop(1);
+    BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+    printf("[RR_adjust_angle] Back on road (colour=%s)\n", colour);
+    printf("currentangle %d with target angle %d\n", *current_angle, angle);
+
+    while (fabs(*current_angle - angle) > allowance - 1){
+      printf("iterating SECONDDD loop %d going to %d\n", *current_angle, angle);
+      BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+      angle = closest_cardinal_angle(*current_angle);
+      printf("current angleis %d with target %d\n", *current_angle, angle);
+
+      if(*current_angle - angle > 0){
+        // left
+        direction = -1;
+        printf("iterating FIRST loop %d going to %d\n", *current_angle, angle);
+        BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+        BT_turn(motor_port_left, -speed*0.7, motor_port_right, speed*0.7);
+        
+      }
+      else{
+        // right
+        direction = 1;
+        printf("iterating FIRST loop %d going to %d\n", *current_angle, angle);
+        BT_read_gyro(PORT_4, 0 , current_angle, &rate);
+        BT_turn(motor_port_left, speed*0.7, motor_port_right, -speed*0.7);
+
+      }
+    }
+
+    printf("\nfinishing with cur %d and target %d\n", *current_angle, angle);
+    BT_all_stop(1);
+    return 0;
+}
+
+
+
+
+/* 
+  Makes robot go down straight line with basic PID control to stay on road
+*/
+
 
 int main(int argc, char *argv[])
 {
@@ -115,18 +486,118 @@ int main(int argc, char *argv[])
  dest_x=atoi(argv[2]);
  dest_y=atoi(argv[3]);
 
+ if (dest_x==-3 || dest_y==-3) {
+  BT_open(HEXKEY);
+  BT_close();
+  exit(1);
+ }
+
  if (dest_x==-1&&dest_y==-1)
  {
   calibrate_sensor();
   exit(1);
  }
 
- /******************************************************************************************************************
-  * OPTIONAL TO DO: If you added code for sensor calibration, add just below this comment block any code needed to
-  *   read your calibration data for use in your localization code. Skip this if you are not using calibration
-  * ****************************************************************************************************************/
+ if(dest_x == -2 && dest_y == -2) {
+  // Test going forward and staying on road
+  printf("Testing going forward and staying on road\n");
+  FILE *f = fopen(CALIB_FILENAME, "r");
+  if (f == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\ncontinuing without it...");
+  } else {
+    int i = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+      int j = 0;
+      char *token = strtok(line, ",");
+      while (token) {
+        calib_colors[i][j] = atof(token);
+        token = strtok(NULL, ",");
+        j++;
+      }
+      i++;
+    }
+    fclose(f);
+  }
+
+  BT_open(HEXKEY);
+
+    // const char *colours[NXT_COLOR_AMT] = { "BLACK", 
+    //                                      "BLUE", 
+    //                                      "GREEN", 
+    //                                      "YELLOW", 
+    //                                      "RED", 
+    //                                      "WHITE" };
+
+  // 1. Black 2. Blue 3. Green 4. Yellow 5. Red 6. White
+  int angle = 0;
+  int targetDegree = 0;
+  int targetDegreeTurn = 90;
+  int rate = 0;
+  int speed = 45;
+  int tl, tr, bl, br;
+
+  BT_read_gyro(PORT_4, 1, &angle, &rate);
+  //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+  //scan_intersection(&tl, &tr, &bl, &br);
+
+  while (true) {
+    RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, angle);
+    RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, angle+90, &angle);
+    RR_adjust_angle(speed, MOTOR_A, MOTOR_D, &angle);
+  }
+
+  // RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+  // RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegreeTurn, &angle);
+  // RR_adjust_angle(speed, MOTOR_A, MOTOR_D);
+  // targetDegree = 90;
+  // targetDegreeTurn = 180;
+  // RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+  // RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegreeTurn, &angle);
+  // RR_adjust_angle(speed, MOTOR_A, MOTOR_D);
+  // targetDegree = 180;
+  // targetDegreeTurn = 270;
+  // RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+  // RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegreeTurn, &angle);
+  // RR_adjust_angle(speed, MOTOR_A, MOTOR_D);
+
+  BT_close();
+  exit(1);
+
+  // while(true){
+    
+
+  //   //RR_go_down_one_road(50, MOTOR_B, MOTOR_C, 100);
+  // }
+  
+ }
+
  
- 
+
+  /******************************************************************************************************************
+   * OPTIONAL TO DO: If you added code for sensor calibration, add just below this comment block any code needed to
+   *   read your calibration data for use in your localization code. Skip this if you are not using calibration
+   * ****************************************************************************************************************/
+
+  FILE *f = fopen(CALIB_FILENAME, "r");
+  if (f == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\ncontinuing without it...");
+  } else {
+    int i = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+      int j = 0;
+      char *token = strtok(line, ",");
+      while (token) {
+        calib_colors[i][j] = atoi(token);
+        token = strtok(NULL, ",");
+        j++;
+      }
+      i++;
+    }
+    fclose(f);
+  }
+
  // Your code for reading any calibration information should not go below this line //
  
  map_image=readPPMimage(&mapname[0],&rx,&ry);
@@ -150,7 +621,7 @@ int main(int argc, char *argv[])
   exit(1);
  }
 
- // Initialize beliefs - uniform probability for each location and direction
+// Initialize beliefs - uniform probability for each location and direction
  for (int j=0; j<sy; j++)
   for (int i=0; i<sx; i++)
   {
@@ -170,7 +641,7 @@ int main(int argc, char *argv[])
  }
 
  fprintf(stderr,"All set, ready to go!\n");
- 
+
 /*******************************************************************************************************************************
  *
  *  TO DO - Implement the main localization loop, this loop will have the robot explore the map, scanning intersections and
@@ -210,11 +681,17 @@ int main(int argc, char *argv[])
  // HERE - write code to call robot_localization() and go_to_target() as needed, any additional logic required to get the
  //        robot to complete its task should be here.
 
+  /* Placeholders. (Likely won't be used since we assume location is randomized.) */
+  int x = -1;
+  int y = -1;
+  int dir = -1;
+  robot_localization(&x, &y, &dir);
+  
 
- // Cleanup and exit - DO NOT WRITE ANY CODE BELOW THIS LINE
- BT_close();
- free(map_image);
- exit(0);
+  // Cleanup and exit - DO NOT WRITE ANY CODE BELOW THIS LINE
+  BT_close();
+  free(map_image);
+  exit(0);
 }
 
 int find_street(void)   
@@ -276,12 +753,82 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl)
    ***********************************************************************************************************************/
 
  // Return invalid colour values, and a zero to indicate failure (you will replace this with your code)
- *(tl)=-1;
- *(tr)=-1;
- *(br)=-1;
- *(bl)=-1;
+  int turnSpeed = 35;
+  const char* colour;
+  colour = get_finalized_color(3);
+
+  if (strcmp(colour, "YELLOW") != 0){ //check if on intersection
+    printf("Colour sensor reading Not Yellow\n");
+    return -1;
+  }
+  int indexColour = get_closest_color(3);
+  
+  //Scan tl and tr
+  BT_turn(MOTOR_A, 80, MOTOR_D, 80); //Move Forward
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tr
+    BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  indexColour = get_closest_color(5);
+  *(tr) = indexColour;
+  printf("TR Colour index: %d\n", indexColour);
+  while (strcmp(colour, "BLACK") != 0) { // go back to road
+    BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // go back to road
+    BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  indexColour = get_closest_color(5);
+  *(tl) = indexColour;
+  printf("TL Colour index: %d\n", indexColour);
+  while (strcmp(colour, "BLACK") != 0) { // go back to road
+    BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  BT_turn(MOTOR_A, -60, MOTOR_D, -60); //Move Backwards
+  BT_turn(MOTOR_A, -60, MOTOR_D, -60); //Move Backwards
+  BT_turn(MOTOR_A, -60, MOTOR_D, -60); //Move Backwards
+  BT_turn(MOTOR_A, -60, MOTOR_D, -60); //Move Backwards
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tr
+    BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  indexColour = get_closest_color(5);
+  printf("BR Colour index: %d\n", indexColour);
+  *(br) = indexColour;
+  while (strcmp(colour, "BLACK") != 0) { // go back to road
+    BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // go back to road
+    BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  indexColour = get_closest_color(5);
+  *(bl) = indexColour;
+  printf("BL Colour index: %d\n", indexColour);
+  while (strcmp(colour, "BLACK") != 0) { // go back to road
+    BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
+    colour = get_finalized_color(3);
+  }
+  
  return(0);
  
+}
+
+const char *get_finalized_color(int n) {
+    int index = get_closest_color(n);
+
+    if (index < 1) {
+        fprintf(stderr, "Invalid color index, setting to UNKNOWN: %d\n", index);
+        return "UNKNOWN";
+    } else {
+        const char *colour = colours[index - 1];
+        printf("Closest color is: %s\n", colour);
+        return colour;
+    }
 }
 
 int turn_at_intersection(int turn_direction)
@@ -388,26 +935,61 @@ int go_to_target(int robot_x, int robot_y, int direction, int target_x, int targ
 
 void calibrate_sensor(void)
 {
- /*
-  * This function is called when the program is started with -1  -1 for the target location. 
-  *
-  * You DO NOT NEED TO IMPLEMENT ANYTHING HERE - but it is strongly recommended as good calibration will make sensor
-  * readings more reliable and will make your code more resistent to changes in illumination, map quality, or battery
-  * level.
-  * 
-  * The principle is - Your code should allow you to sample the different colours in the map, and store representative
-  * values that will help you figure out what colours the sensor is reading given the current conditions.
-  * 
-  * Inputs - None
-  * Return values - None - your code has to save the calibration information to a file, for later use (see in main())
-  * 
-  * How to do this part is up to you, but feel free to talk with your TA and instructor about it!
-  */   
+  /*
+   * This function is called when the program is started with -1  -1 for the target location.
+   *
+   * You DO NOT NEED TO IMPLEMENT ANYTHING HERE - but it is strongly recommended as good calibration will make sensor
+   * readings more reliable and will make your code more resistent to changes in illumination, map quality, or battery
+   * level.
+   *
+   * The principle is - Your code should allow you to sample the different colours in the map, and store representative
+   * values that will help you figure out what colours the sensor is reading given the current conditions.
+   *
+   * Inputs - None
+   * Return values - None - your code has to save the calibration information to a file, for later use (see in main())
+   *
+   * How to do this part is up to you, but feel free to talk with your TA and instructor about it!
+   */
 
   /************************************************************************************************************************
    *   OIPTIONAL TO DO  -   Complete this function
    ***********************************************************************************************************************/
-  fprintf(stderr,"Calibration function called!\n");  
+  fprintf(stderr,"Calibration function called!\n");
+
+  BT_open(HEXKEY);
+  
+  /* 
+    WARNING: Old calibration file will be OVERWRITTEN. 
+
+    Make sure you don't need the old calibration values 
+    before calling this function!
+  */
+  
+  FILE *fp = fopen(CALIB_FILENAME, "w");
+  if (fp == NULL) {
+    perror("couldn't open" CALIB_FILENAME "\nexiting...");
+    exit(1);
+  }
+
+  const char *colours[NXT_COLOR_AMT] = { "BLACK", 
+                                         "BLUE", 
+                                         "GREEN", 
+                                         "YELLOW", 
+                                         "RED", 
+                                         "WHITE" };
+  
+  for (size_t i = 0; i < NXT_COLOR_AMT; i++) {
+    printf("Place the NXT sensor over the color: %s, then press any key to continue.", colours[i]);
+    getchar();
+
+    double *avg_reading = (double *) calloc(3, sizeof(double));
+    avg_reading = read_sanitized_color(CALIB_AMT);
+    fprintf(fp, "%f,%f,%f\n", avg_reading[0], avg_reading[1], avg_reading[2]);
+    free(avg_reading);
+  }
+  printf("Calibration complete! Data saved to: %s\n", CALIB_FILENAME);
+
+  fclose(fp);
 }
 
 int parse_map(unsigned char *map_img, int rx, int ry)
@@ -430,7 +1012,7 @@ int parse_map(unsigned char *map_img, int rx, int ry)
 
    The image must be a properly formated .ppm image, see readPPMimage below for details of
    the format. The GIMP image editor saves properly formatted .ppm images, as does the
-   imagemagick image processing suite.
+   imagemagick image processing suite.return(-1);
    
    The map representation is read into the map array, with each row in the array corrsponding
    to one intersection, in raster order, that is, for a map with k intersections along its width:
