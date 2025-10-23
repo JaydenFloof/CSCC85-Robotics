@@ -255,20 +255,23 @@ int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left
 
     // if(speed - PID < -100) PID = 100 + speed;
     
-    if (targetDegree > 0) {
-      leftPower = (int)PID*speed + ((PID*speed)/fabs(PID*speed))*60 - ((PID*speed)/fabs(PID*speed))*25;           
-      rightPower = -((int)PID*speed + ((PID*speed)/fabs(PID*speed))*60);
+if (targetDegree > 0) {
+      leftPower = (int)PID*speed + (((int)PID*speed)/fabs((int)PID*speed))*55 - (((int)PID*speed)/fabs((int)PID*speed))*25;           
+      rightPower = -((int)PID*speed + ((PID*speed)/fabs(PID*speed))*65);
     }
     else {
-      leftPower = (int)PID*speed + ((PID*speed)/fabs(PID*speed))*60;             
-      rightPower = -((int)PID*speed + ((PID*speed)/fabs(PID*speed))*60 - ((PID*speed)/fabs(PID*speed))*25);
+      leftPower = (int)PID*speed + (((int)PID*speed)/fabs((int)PID*speed))*65;             
+      rightPower = -((int)PID*speed + (((int)PID*speed)/fabs((int)PID*speed))*55 - (((int)PID*speed)/fabs((int)PID*speed))*25);
     }
     
+    leftPower = leftPower*1.1;
+    rightPower = rightPower*1.1;
+
     if (fabs(leftPower) > 100){
-      leftPower = (PID*speed)/fabs(PID*speed)*99;
+      leftPower = ((PID*speed)/fabs(PID*speed))*99;
     }
     if (fabs(rightPower) > 100){
-      leftPower = -((PID*speed)/fabs(PID*speed)*99);
+      rightPower = -((PID*speed)/fabs(PID*speed))*99;
     }
 
 
@@ -398,14 +401,32 @@ bool location_known() {
   Go backwards back to the intersection if a RED border is hit
 */
 int RR_return_to_intersection(int speed, char motor_port_right, char motor_port_left, int *current_angle){
-  const char *colour = get_finalized_color(3);
+  const char *colour = get_finalized_color(5);
+  int wentDownRoad = -1;
   if(strcmp(colour, "RED") == 0){
     printf("RED DETECTED, REVERSING\n");
     // RR_adjust_angle(35, motor_port_right, motor_port_left, current_angle);
     for(int i=0; i<8; i++){
       BT_turn(MOTOR_A, -40, MOTOR_D, -40);
     }
-    RR_go_down_one_road(-speed, motor_port_right, motor_port_left, 200, current_angle, *current_angle);
+    colour = get_finalized_color(5);
+    int cardAngle = closest_cardinal_angle(*current_angle);
+    while (colour != "YELLOW") {
+      wentDownRoad = RR_go_down_one_road(-speed, motor_port_right, motor_port_left, 200, current_angle, cardAngle);
+      RR_adjust_street(45, motor_port_right, motor_port_left, current_angle);
+      colour = get_finalized_color(5);
+    }
+    if (wentDownRoad == 1){
+      for (int i=0; i<4; i++){
+        BT_turn(MOTOR_A, -50, MOTOR_D, -50);
+      }
+    }
+    
+    BT_all_stop(1);
+    cardAngle = closest_cardinal_angle(*current_angle);
+    RR_turn_down_one_road(1, motor_port_right, motor_port_left, cardAngle-90, current_angle);
+    BT_all_stop(1);
+    
     return 0;
   }
   else{
@@ -490,21 +511,26 @@ int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int
     int allowance = 1;
     int rate = 0;
     int angle = 1;
+    int max_iterations = 7;
+    int counter = 0;
 
     // If we are already on the road, nothing to do
     if (strcmp("BLACK", colour) == 0 || strcmp("YELLOW", colour) == 0){
       BT_all_stop(1);
+      return -1;
     }
 
     printf("\nADJUSTING STREEEET\n");
+    angle = closest_cardinal_angle(*current_angle);
 
     while (strcmp("BLACK", colour) != 0 && strcmp("YELLOW", colour) != 0) {
         // for(int i = 0; i < 2; i++){
         //   BT_turn(motor_port_left, -speed*1.1, motor_port_right, -speed*1.1);
         // }
+        counter = 0;
 
         BT_read_gyro(PORT_4, 0 , current_angle, &rate);
-        angle = closest_cardinal_angle(*current_angle);
+        //angle = closest_cardinal_angle(*current_angle);
         printf("current angles STREET %d with target %d\n", *current_angle, angle);
 
         if(*current_angle - angle > 0){
@@ -512,33 +538,37 @@ int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int
           direction = -1;
           colour = get_finalized_color(3);
           // while ((*current_angle - angle) > allowance){
-          while(strcmp("BLACK", colour) != 0 && strcmp("YELLOW", colour )!= 0){
+          while(strcmp("BLACK", colour) != 0 && strcmp("YELLOW", colour )!= 0 && counter < max_iterations){
             printf("iterating FIRST loop LEFT %d going to %d\n", *current_angle, angle);
             // if((*current_angle - angle) <= allowance){
             //   BT_all_stop(1);
             //   break;
             // }
-            BT_turn(motor_port_left, -speed*0.8, motor_port_right, speed*0.8);
+            BT_turn(motor_port_left, -speed, motor_port_right, speed);
             BT_read_gyro(PORT_4, 0 , current_angle, &rate);
             colour = get_finalized_color(3);
+            counter++;
           }
+          counter=0;
           BT_all_stop(1);
         }
-
         else{
           // right
           direction = 1;
           // while ((*current_angle - angle) < -allowance){
-          while(strcmp("BLACK", colour) != 0 && strcmp("YELLOW", colour )!= 0){
+          while(strcmp("BLACK", colour) != 0 && strcmp("YELLOW", colour )!= 0 && counter < max_iterations){
             printf("iterating FIRST right LEFT %d going to %d\n", *current_angle, angle);
             // if((*current_angle - angle) >= -allowance){
             //   BT_all_stop(1);
             //   break;
             // }
-            BT_turn(motor_port_left, speed*0.8, motor_port_right, -speed*0.8);
+            BT_turn(motor_port_left, speed, motor_port_right, -speed);
             BT_read_gyro(PORT_4, 0 , current_angle, &rate);
             colour = get_finalized_color(3);
+            counter++;
           }
+          counter=0;
+          max_iterations = max_iterations + 7; // increase max iterations for next time
           BT_all_stop(1);
         }
 
@@ -550,6 +580,8 @@ int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int
     BT_all_stop(1);
     return 0;
 }
+
+
 
 int main(int argc, char *argv[])
 {
@@ -627,26 +659,31 @@ int main(int argc, char *argv[])
   int targetDegree = 0;
   int targetDegreeTurn = 90;
   int rate = 0;
-  int speed = 40;
+  int speed = 45;
   int tl, tr, bl, br;
   int i = 0;
   int add = 0;
   int turn = 0;
+  int wentDownRoad = -1;
 
   BT_read_gyro(PORT_4, 1, &angle, &rate);
 
   //RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 
-
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   
   while (true) {
     targetDegree = closest_cardinal_angle(angle);
-    RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+    wentDownRoad = RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 
-    // scan_intersection(&tl, &tr, &bl, &br, &angle);
-    turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree + 90, &angle);
-    
-    RR_adjust_street(speed+10, MOTOR_A, MOTOR_D, &angle);
+    //scan_intersection(&tl, &tr, &bl, &br, &angle);
+    if (wentDownRoad == 0){
+      turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree + 90, &angle);
+    }
+    wentDownRoad = -1;
+    //turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree + 90, &angle);
+    BT_read_gyro(PORT_4, 0, &angle, &rate);
+    RR_adjust_street(45, MOTOR_A, MOTOR_D, &angle);
     //RR_adjust_angle(speed, MOTOR_A, MOTOR_D, &angle);
     
     // if (turn == 0){
@@ -659,12 +696,15 @@ int main(int argc, char *argv[])
     BT_read_gyro(PORT_4, 0, &angle, &rate);
 
     targetDegree = closest_cardinal_angle(angle);
-    RR_go_down_one_road(speed+10, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
+    wentDownRoad = RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, targetDegree);
 
-    // scan_intersection(&tl, &tr, &bl, &br, &angle);
-    turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree - 90, &angle);
-    
-    RR_adjust_street(speed, MOTOR_A, MOTOR_D, &angle);
+    //scan_intersection(&tl, &tr, &bl, &br, &angle);
+    if (wentDownRoad == 0){
+      turn = RR_turn_down_one_road(1, MOTOR_A, MOTOR_D, targetDegree - 90, &angle);
+    }
+    wentDownRoad = -1;
+    BT_read_gyro(PORT_4, 0, &angle, &rate);
+    RR_adjust_street(45, MOTOR_A, MOTOR_D, &angle);
     //RR_adjust_angle(speed, MOTOR_A, MOTOR_D, &angle);
     
     // if (turn == 0){
@@ -705,7 +745,7 @@ int main(int argc, char *argv[])
 
   //   //RR_go_down_one_road(50, MOTOR_B, MOTOR_C, 100);
   // }
-  
+ 
  }
 
 if (dest_x==-4 && dest_y==-4) {
@@ -972,7 +1012,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   int turnSpeed = 45;
   const char* colour;
   int rate;
-  colour = get_finalized_color(3);
+  colour = get_finalized_color(10);
 
   if (strcmp(colour, "YELLOW") != 0){ //check if on intersection
     printf("Colour sensor reading Not Yellow\n");
@@ -987,29 +1027,29 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   BT_all_stop(1);
   printf("BACK DONW\n\n");
   
-  colour = get_finalized_color(3);
+  colour = get_finalized_color(5);
   while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan br
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
   BT_read_gyro(PORT_4, 0 , angle, &rate);
   indexColour = get_closest_color(5);
-  colour = get_finalized_color(3);
+  colour = get_finalized_color(5);
   *(br) = indexColour;
   printf("BR Colour index: %d %s LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\n", indexColour, colours[indexColour-1]);
   
   
   while (strcmp(colour, "BLACK") != 0 && strcmp(colour, "YELLOW") != 0 && strcmp(colour, "UNKNOWN")) { // go back to road
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
-  colour = get_finalized_color(3);
+  colour = get_finalized_color(5);
 
   while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan bl
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
   indexColour = get_closest_color(5);
@@ -1018,21 +1058,30 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   
   while (strcmp(colour, "BLACK") != 0 && strcmp(colour, "YELLOW") != 0 && strcmp(colour, "UNKNOWN")) { // go back to road
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
 
   RR_adjust_angle(50, MOTOR_A, MOTOR_D, angle, -1);
   //RR_adjust_street(50,MOTOR_A, MOTOR_D, angle);
   RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 200, angle, *angle);
-  for(int i=0; i<6; i++){
+
+  colour = get_finalized_color(5);
+  while (colour == "YELLOW") {
+    BT_turn(MOTOR_A, 50, MOTOR_D, 50);
+    colour = get_finalized_color(5);
+  }
+  BT_all_stop(1);
+
+  for(int i=0; i<3; i++){
     BT_turn(MOTOR_A, 50, MOTOR_D, 50); //Move Forward
   }
+  BT_all_stop(1);
 
   // scan TR and TL
   while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tr
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
   indexColour = get_closest_color(5);
@@ -1041,13 +1090,13 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
 
   while (strcmp(colour, "BLACK") != 0) { // go back to road
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
 
   while (strcmp(colour, "BLACK") == 0 || strcmp(colour, "UNKNOWN") == 0) { // scan tl
     BT_turn(MOTOR_A, turnSpeed, MOTOR_D, -turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
   indexColour = get_closest_color(5);
@@ -1056,7 +1105,7 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
 
   while (strcmp(colour, "BLACK") != 0) { // go back to road
     BT_turn(MOTOR_A, -turnSpeed, MOTOR_D, turnSpeed);
-    colour = get_finalized_color(3);
+    colour = get_finalized_color(5);
   }
   BT_all_stop(1);
 
@@ -1065,7 +1114,6 @@ int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle)
   RR_go_down_one_road(-40, MOTOR_A, MOTOR_D, 200, angle, *angle);
   
  return(0);
- 
 }
 
 const char *get_finalized_color(int n) {
@@ -1080,6 +1128,7 @@ const char *get_finalized_color(int n) {
         return colour;
     }
 }
+
 
 int turn_at_intersection(int turn_direction)
 {
