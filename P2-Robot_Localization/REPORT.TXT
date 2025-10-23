@@ -20,22 +20,49 @@ _______________________________________________________________________
 Q1) What is the total number of probabilities your robot has to keep 
     track of for a map of size m x n?
 
+The total number of probabilities is 4 * m * n, as there are 4 possible
+directions the robot can take on a map of size m x n.
 
 
 Q2) What should be the initial value of the probabilities your robot is 
     keeping track of?
 
+The initial value of the probabilities should be (1 / [4 * m * n]), as 
+all possible directions and locations are equally likely and must sum up
+to 1.
 
 
 Q3) Describe your strategy for dealing with sensor noise, and
     explain why it should work and how you tested it.
 
+Multiple color readings are taken and averaged to produce the most likely
+color. We assume the color sensor noise is Gaussian, and we obtain two 
+useful properties:
+
+- The amount of noise for each measurement is independent of other sensor readings.
+- Error values close to zero are more likely.
+- Error values away from zero become less likely the farther they are.
+
+This was tested empirically via the level of information consistency
+provided by sensor calibration.
 
 
 Q4) Describe your probability update function in detail and
     explain how you defined 'agreement' as well as how you
     Determined the amount by which to update probabilities.
 
+The probability update function is a 3D matrix, where each cell 
+corresponds to a potential location and direction of the robot. 
+For each update iteration, we take color sensor readings of each 
+corner of the current intersection and compute the probability matrix
+(i.e., the 'agreement') as follows:
+
+- N = # of matching color readings.
+- M = # of non-matching color readings.
+- P(correct_color_reading) = 0.85
+- P = P(correct_color_reading)^N + (1 - P(correct_color_reading))^M
+
+At the end of the iteration, all probabilities are normalized.
 
 
 Q5) Describe in detail your robot’s exploration strategy – it should
@@ -43,6 +70,16 @@ Q5) Describe in detail your robot’s exploration strategy – it should
     until hitting the boundary of the map. How did you choose this
     Strategy?
 
+The robot's exploration strategy is as follows:
+
+- Choose a random direction, except backwards. (Random Sampling)
+- Scan the corners of the intersection. (Gather belief data)
+- Repeat until confidence in localization is sufficient.
+
+This strategy was chosen for simplicity and fairness to all possible
+locations. The exploration strategy does not prevent revisiting 
+intersections, although this is largely not a problem, as it may 
+correct previous erroneous sensor readings at such intersections.
 
 
 Q6) Describe in detail how beliefs are shifted when the robot gets
@@ -51,6 +88,16 @@ Q6) Describe in detail how beliefs are shifted when the robot gets
     assumptions regarding the robot's motion support your
     strategy for shifting belief values in this case.
 
+When the robot gets to a boundary, it returns to the previous intersection
+and makes a right turn. When a new intersection is eventually found, the 
+action model is updated to consider the actions which led to reaching
+this new intersection.
+
+As a result, hitting the boundary does not update our beliefs whatsoever.
+New localization information *could* be gleamed from hitting the boundary, 
+but reading intersections is not only typically more useful than boundary 
+information, it also does not "pollute" the beliefs with data that does not
+follow the designed localization format. (i.e., intersection corner readings)
 
 
 Q7) Describe in detail how beliefs are shifted when the robot turns
@@ -58,36 +105,77 @@ Q7) Describe in detail how beliefs are shifted when the robot turns
     Intersection. Describe your assumptions about robot motion,
     and how these support your strategy for handling this case.
 
+Beliefs are not shifted when the robot merely turns 90 degrees. 
+Instead, beliefs are shifted when the robot turns AND moves forward. 
+
+We assume the robot's probability to turn and move forward along an 
+intersection is 50%, turning diagonally 20% (both diagonals), and not 
+turning enough 10%, as per the lecture notes.
 
 
 Q8) Explain your method for deciding when the robot has achieved
     correct localization.
 
+The belief confidence threshold to end localization and proceed to the 
+location defined by (dest_x, dest_y) is 90%. Otherwise, the robot will 
+resume localization.
 
 
 Q9) Briefly explain your robot design choices, including sensor placement
     and robot mobility considerations.
 
+The color sensor is placed directly in the center, below the robot to 
+prevent ambient light from affecting readings. For intersection turns, 
+we found that moving the robot backwards by half of the distance its 
+wheels are apart (constant), turning to another intersection becomes 
+surprisingly consistent! 
+
+As such, the wheels were designed to maximize grip, and thus minimize
+the turning error.
 
 
 Q10) What parameters did you find affect the most the ability of the robot to
      determine its location?
 
+The gaps in the paper of the physical map often caused the NXT color sensor
+to read the incorrect colors, and lead the robot astray despite being in the
+correct location. (Often an intersection.)
+
+Furthermore, the color and gyro sensor would often fail (values keep climbing 
+without end), causing the robot to continuously perform a single action, such as 
+street realignment. At times, even the strength of the bluetooth connection and 
+battery capacity of the EV3 would determine either the responsiveness and 
+movement consistency of the robot, respectively.
 
 
 Q11) Can external factors (illumination in the room, for example) affect the
      ability of the robot to find itself?
 
+No, the color sensor is placed directly underneath the center of the robot 
+to avoid issues with illumination. 
+
+Aside: Previous designs used two "hoods" above the sensor to cover any 
+external light where the color sensor reads.
 
 
 Q12) On average, how many intersections does your robot need to visit
      to achieve successful localization?
 
+Three intersections need to be visited on average before the robot 
+achieves successful localization.
 
 
 Q13) Are there locations in the map that make localization harder? (i.e.
      does it matter where your robot starts its journey? Why?)
 
+Starting on an intersection with non-unique corner configurations 
+(i.e., some intersections have the same colors, with possibly differing
+orientations) often delay localization, as the robot can be less sure of 
+which intersection it is travelling on.
+
+Since we chose to randomly select a direction to go for localization, 
+starting near the corners of the grid map may cause the robot to hit a 
+boundary and thus require more turns to properly begin localization.
 
 
 
@@ -99,32 +187,44 @@ have improved your learning experience).
 
 1) The main steps of a robot localization algorithm
 
+Yes.
 
 
 2) Dealing with real-world sensors
 
+Yes.
 
 
 3) Dealing with real-world motors and robot motions
 
+Yes.
 
 
 4) Using probabilities to keep track of belief about a robot's position
 
+Yes. (The notes where *extraordinarily* helpful in implementing the algorithm.)
 
 
 5) Managing uncertainty (e.g. in the quality of sensor readings, or accuracy of
    robot motions)
 
+No. It was often whether the sensors worked at all that caused hardship, 
+rather than their quality. If the sensors were working, they typically 
+worked fine.
 
 
 6) Do you feel confident you could implement a probabilistic localization algorithm
    for a more complex robot, working in a real world environment?
    (please explain your answer)
 
+Yes. By design, the algorithms required for probabilistic localization 
+are general enough to be applied to any system involving motion.
 
+The project teaches the importance of proper calibration
+The course notes show the reasoning behind algebra required for 
+belief updates in-depth, so they can be easily transferable to other
+histogram-based grid localization schemes.
 
 7) Any other comments regarding your experience with this project?
 
-
-
+No.
