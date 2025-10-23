@@ -77,7 +77,7 @@ int robot_localization(int *robot_x, int *robot_y, int *direction);
 int go_to_target(int robot_x, int robot_y, int direction, int target_x, int target_y);
 int find_street(void);
 int drive_along_street(void);
-int scan_intersection(int *tl, int *tr, int *br, int *bl);
+int scan_intersection(int *tl, int *tr, int *br, int *bl, int *angle);
 int turn_at_intersection(int turn_direction);
 void calibrate_sensor(void);
 unsigned char *readPPMimage(const char *filename, int *rx, int*ry);
