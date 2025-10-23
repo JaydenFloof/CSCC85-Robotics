@@ -72,6 +72,22 @@ code that you have to complete in order to implement the localization algorithms
 	#define HEXKEY "00:16:53:56:4C:53"	// <--- SET UP YOUR EV3's HEX ID here
 #endif
 
+/* Turn direction. */
+typedef enum {
+  NO_TURN = -1, 
+  RIGHT_TURN, 
+  LEFT_TURN
+} TURN_DIR;
+
+/* Move direction. */
+typedef enum {
+  UP_DIR, 
+  RIGHT_DIR, 
+  DOWN_DIR, 
+  LEFT_DIR
+} MOVE_DIR;
+
+
 int parse_map(unsigned char *map_img, int rx, int ry);
 int robot_localization(int *robot_x, int *robot_y, int *direction);
 int go_to_target(int robot_x, int robot_y, int direction, int target_x, int target_y);
@@ -87,7 +103,7 @@ int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, 
 int RR_turn_down_one_road(int speed, char motor_port_right, char motor_port_left, int targetDegree, int *angle);
 double *read_sanitized_color(int n);
 const char *get_finalized_color(int n);
-int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle);
+int RR_adjust_angle(int speed, char motor_port_right, char motor_port_left, int *current_angle, int custom);
 int RR_adjust_street(int speed, char motor_port_right, char motor_port_left, int *current_angle);
 int closest_cardinal_angle(int angle);
 int RR_go_down_one_road(int speed, char motor_port_right, char motor_port_left, int maxDistance, int *angle, int targetDegree);

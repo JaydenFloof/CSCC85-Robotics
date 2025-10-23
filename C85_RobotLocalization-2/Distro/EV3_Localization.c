@@ -87,6 +87,7 @@
 */
 
 #include "EV3_Localization.h"
+#include "EV3_Belief.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -100,20 +101,6 @@
 #define TURN_SPEED 10                     // Turn speed.
 #define LOC_CONFIDENCE_THRESHOLD 0.6      // Amount of confidence required to assume the robot's known location.
 
-/* Turn direction. */
-typedef enum {
-  NO_TURN = -1, 
-  RIGHT_TURN, 
-  LEFT_TURN
-} TURN_DIR;
-
-/* Move direction. */
-typedef enum {
-  UP_DIR, 
-  RIGHT_DIR, 
-  DOWN_DIR, 
-  LEFT_DIR
-} MOVE_DIR;
 
 int map[400][4];            // This holds the representation of the map, up to 20x20
                             // intersections, raster ordered, 4 building colours per
@@ -773,7 +760,7 @@ if (dest_x==-4 && dest_y==-4) {
   BT_read_gyro(PORT_4, 0, &angle, &rate);
 
   find_street(&angle, 40);
-  RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 200, &angle, closest_cardinal_angle(angle));
+  // RR_go_down_one_road(40, MOTOR_A, MOTOR_D, 200, &angle, closest_cardinal_angle(angle));
   BT_all_stop(1);
   exit(1);
 }
@@ -922,7 +909,7 @@ int find_street(int *angle, int speed)
 
   printf("\nadjusted angle to gthing %d and %d\n", *angle, closest_cardinal_angle(*angle));
 
-  for(int i=0; i<10; i++){
+  for(int i=0; i<15; i++){
     BT_turn(MOTOR_A, 25, MOTOR_D, 25);
     colour = get_finalized_color(3);
     if(strcmp(colour, "BLACK") != 0){
@@ -953,7 +940,7 @@ int find_street(int *angle, int speed)
     printf("\n\n finsihed getting to custom angle %d\n\n", *angle);
     RR_adjust_street(40, MOTOR_A, MOTOR_D, angle);
     printf("\nFInisheda djust streeet with %d \n", *angle);
-    RR_adjust_angle(40, MOTOR_A, MOTOR_D, angle, *angle + 20);
+    // RR_adjust_angle(40, MOTOR_A, MOTOR_D, angle, *angle + 20);
     // RR_adjust_street(40, MOTOR_A, MOTOR_D, angle);
 
     return 0;
@@ -1146,6 +1133,31 @@ int turn_at_intersection(int turn_direction)
   return(0);
 }
 
+int dir_to_deg(int dir) {
+    switch (dir) {
+        case UP_DIR:    return 0;
+        case RIGHT_DIR: return 90;
+        case DOWN_DIR:  return 180;
+        case LEFT_DIR:  return 270;
+        default: return 0;
+    }
+}
+
+/* Map an absolute cardinal degree (0/90/180/270 or close) to a MOVE_DIR */
+int angle_to_dir(int deg) {
+  int d = deg % 360;
+  if (d < 0) d += 360;
+  if (d == 0) return UP_DIR;
+  if (d == 90) return RIGHT_DIR;
+  if (d == 180) return DOWN_DIR;
+  if (d == 270) return LEFT_DIR;
+  /* fallback: choose nearest */
+  if (d < 45 || d >= 315) return UP_DIR;
+  if (d < 135) return RIGHT_DIR;
+  if (d < 225) return DOWN_DIR;
+  return LEFT_DIR;
+}
+
 int robot_localization(int *robot_x, int *robot_y, int *direction)
 {
  /*  This function implements the main robot localization process. You have to write all code that will control the robot
@@ -1199,85 +1211,105 @@ int robot_localization(int *robot_x, int *robot_y, int *direction)
    *   TO DO  -   Complete this function
    ***********************************************************************************************************************/
 
-    // printf("Starting robot localization...\n");
+    printf("Starting robot localization...\n");
 
-    // int localized = 0;
-    // int corner_readings[4];   // top-left, top-right, bottom-right, bottom-left
-    // int action = UP_DIR;      // assume initial facing direction
-    // int step = 0;
-    // int angle = 0, rate = 0;
-    // BT_read_gyro(PORT_4, 1, &angle, &rate);
+  int corner_readings[4];
+  int speed = 40;
+  int angle = 0, rate = 0;
+  BT_read_gyro(PORT_4, 0, &angle, &rate);
 
-    // // === 1. Get onto a street ===
-    // printf("Finding street...\n");
-    // find_street(&angle, 40);  // aligns robot with a street (speed 40)
+  printf("Finding street...\n");
+  find_street(&angle, 40);
 
-    // // === 2. Initialize beliefs uniformly ===
-    // for (int k = 0; k < 4; k++) {
-    //     for (int j = 0; j < sy; j++) {
-    //         for (int i = 0; i < sx; i++) {
-    //             beliefs[i + (j * sx)][k] = 1.0 / (sx * sy * 4);
-    //         }
-    //     }
-    // }
-    // normalize_beliefs();
-    // printf("Initial uniform belief distribution created.\n");
-
-    // // === 3. Localization loop ===
-    // while (!localized)
-    // {
-    //     printf("\n--- Step %d ---\n", step++);
-
-    //     // (a) Move physically to the next intersection
-    //     drive_along_street();
-    //     BT_all_stop(1);
-
-    //     // (b) Sense environment
-    //     printf("Scanning intersection...\n");
-    //     scan_intersection(&corner_readings[0], &corner_readings[1], &corner_readings[2], &corner_readings[3], &angle);
-
-    //     // (c) Update beliefs using Bayesian filter
-    //     printf("Updating beliefs...\n");
-    //     update_beliefs(action, corner_readings);
-
-    //     // (d) Check if robot is localized
-    //     double max_belief = 0.0;
-    //     int best_i = -1, best_j = -1, best_dir = -1;
-
-    //     for (int k = 0; k < 4; k++) {
-    //         for (int j = 0; j < sy; j++) {
-    //             for (int i = 0; i < sx; i++) {
-    //                 double b = beliefs[i + (j * sx)][k];
-    //                 if (b > max_belief) {
-    //                     max_belief = b;
-    //                     best_i = i;
-    //                     best_j = j;
-    //                     best_dir = k;
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    //     printf("Highest belief: %.3f at (%d, %d), dir=%d\n", max_belief, best_i, best_j, best_dir);
-
-    //     // (e) Decide if localization confidence is high enough
-    //     if (max_belief > 0.60) {   // threshold can be tuned
-    //         localized = 1;
-    //         *robot_x = best_i;
-    //         *robot_y = best_j;
-    //         *direction = best_dir;
-    //         printf("Robot localized with high confidence!\n");
-    //         break;
-    //     }
-
-    //     // (f) Otherwise, explore further — pick a turn direction and continue
-    //     printf("Not confident yet, turning and exploring...\n");
-    //     turn_at_intersection(RIGHT_TURN);   // example: always turn right for exploration
-    //     action = RIGHT_DIR;
-    // }
-
-    // printf("Localization complete.\n");
+  /* Initialize uniform belief distribution */
+  if (sx <= 0 || sy <= 0) {
+    fprintf(stderr, "Map not parsed (sx=%d, sy=%d). Cannot localize.\n", sx, sy);
     return 0;
+  }
+
+  for (int k = 0; k < 4; k++) {
+    for (int j = 0; j < sy; j++) {
+      for (int i = 0; i < sx; i++) {
+        beliefs[i + (j * sx)][k] = 1.0 / (sx * sy * 4);
+      }
+    }
+  }
+
+  int steps = 0;
+  const int max_steps = 200;
+
+  /* Get initial facing direction from gyro */
+  int card = closest_cardinal_angle(angle);
+  int facing = angle_to_dir(card);
+
+  while (steps++ < max_steps) {
+    printf("\n--- Localization step %d ---\n", steps);
+
+    int move_action = facing; 
+
+    int result = RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, closest_cardinal_angle(angle));
+    if (result != 0) {
+      /* Try to recover: find a street and retry */
+      fprintf(stderr, "Drive failed (code=%d). Attempting to re-find street and continue.\n", result);
+      find_street(&angle, 40);
+      BT_read_gyro(PORT_4, 0, &angle, &rate);
+      card = closest_cardinal_angle(angle);
+      facing = angle_to_dir(card);
+      continue;
+    }
+    BT_all_stop(1);
+
+    /* Update facing after the move using gyro */
+    BT_read_gyro(PORT_4, 0, &angle, &rate);
+    card = closest_cardinal_angle(angle);
+    facing = angle_to_dir(card);
+
+    /* Scan the intersection and update beliefs */
+    printf("Scanning intersection...\n");
+    scan_intersection(&corner_readings[0], &corner_readings[1], &corner_readings[2], &corner_readings[3], &angle);
+    BT_all_stop(1);
+
+    printf("Updating beliefs (action=%d)...\n", move_action);
+    // update_beliefs(move_action, corner_readings);
+
+    /* Find best belief */
+    double max_belief = 0.0;
+    int best_i = -1, best_j = -1, best_dir = -1;
+    for (int k = 0; k < 4; k++) {
+      for (int j = 0; j < sy; j++) {
+        for (int i = 0; i < sx; i++) {
+          double b = beliefs[i + (j * sx)][k];
+          if (b > max_belief) {
+            max_belief = b;
+            best_i = i;
+            best_j = j;
+            best_dir = k;
+          }
+        }
+      }
+    }
+
+    printf("Highest belief: %.4f at (%d, %d), dir=%d\n", max_belief, best_i, best_j, best_dir);
+
+    if (max_belief > LOC_CONFIDENCE_THRESHOLD) {
+      /* Localized */
+      *robot_x = best_i;
+      *robot_y = best_j;
+      *direction = best_dir;
+      printf("Robot localized with high confidence! Location=(%d,%d) dir=%d prob=%.4f\n", *robot_x, *robot_y, *direction, max_belief);
+      return 1;
+    }
+
+    printf("Not confident yet (%.4f). Turning to explore another road.\n", max_belief);
+    turn_at_intersection(RIGHT_TURN);
+    /* Update facing after the turn */
+    BT_read_gyro(PORT_4, 0, &angle, &rate);
+    card = closest_cardinal_angle(angle);
+    facing = angle_to_dir(card);
+  }
+
+  fprintf(stderr, "Localization failed: exceeded max steps (%d).\n", max_steps);
+  return 0;
 }
 
 int go_to_target(int robot_x, int robot_y, int direction, int target_x, int target_y)
@@ -1302,9 +1334,98 @@ int go_to_target(int robot_x, int robot_y, int direction, int target_x, int targ
   /************************************************************************************************************************
    *   TO DO  -   Complete this function
    ***********************************************************************************************************************/
-  return 0;
-}
 
+    // Defensive normalization: header uses 0..3, some code uses 1..4
+    // If direction appears to be 1..4, convert to 0..3
+    if (direction >= 1 && direction <= 4) {
+        direction = direction - 1; // 1->0, 2->1, ...
+    }
+
+    int angle = 0, rate = 0;
+    int speed = 40;      
+    int maxRetries = 3;    
+    int attempts = 0;
+
+    // Quick success if already at target
+    if (robot_x == target_x && robot_y == target_y) {
+        BT_all_stop(1);
+        return 1;
+    }
+
+    // Keep attempts counter to avoid infinite loops
+    while (robot_x != target_x || robot_y != target_y) {
+        int dx = target_x - robot_x;
+        int dy = target_y - robot_y;
+
+        // Choose next direction: prioritize horizontal or vertical as desired
+        int next_dir;
+        if (dy < 0) next_dir = UP_DIR;        // target is north (smaller y)
+        else if (dx > 0) next_dir = RIGHT_DIR; // target east
+        else if (dy > 0) next_dir = DOWN_DIR;  // target south
+        else if (dx < 0) next_dir = LEFT_DIR;  // target west
+        else {
+            // Shouldn't get here but break defensively
+            break;
+        }
+
+        // Turn to face next_dir if needed
+        if (direction != next_dir) {
+            int targetAngle = dir_to_deg(next_dir);
+            // Turn to the heading (this uses absolute gyro degrees)
+            RR_turn_down_one_road(50, MOTOR_A, MOTOR_D, targetAngle, &angle);
+            direction = next_dir;
+            // Fine-tune alignment on the road
+            RR_adjust_street(40, MOTOR_A, MOTOR_D, &angle);
+        }
+
+        // Drive forward one road segment toward the intersection
+        int result = RR_go_down_one_road(speed, MOTOR_A, MOTOR_D, 200, &angle, closest_cardinal_angle(angle));
+        if (result != 0) {
+            // Attempt recovery a few times
+            attempts++;
+            if (attempts <= maxRetries) {
+                // Try find a nearby street to reorient the robot
+                find_street(&angle, 40);
+                RR_adjust_street(40, MOTOR_A, MOTOR_D, &angle);
+                continue;
+            } else {
+                // More aggressive recovery: relocalize then retry
+                int rx = robot_x, ry = robot_y, dir_tmp = direction;
+                if (!robot_localization(&rx, &ry, &dir_tmp)) {
+                    // localization failed -> give up
+                    BT_all_stop(1);
+                    return 0;
+                }
+                // Update our internal position & direction from localization
+                robot_x = rx; robot_y = ry;
+                direction = dir_tmp;
+                attempts = 0;
+                continue;
+            }
+        }
+
+        // successful traverse; update position based on direction
+        if (direction == UP_DIR) robot_y--;
+        else if (direction == RIGHT_DIR) robot_x++;
+        else if (direction == DOWN_DIR) robot_y++;
+        else if (direction == LEFT_DIR) robot_x--;
+
+        // Optional: scan intersection and update beliefs
+        int corner_readings[4];
+        scan_intersection(&corner_readings[0], &corner_readings[1], &corner_readings[2], &corner_readings[3], &angle);
+        // If you use the belief system in EV3_Belief.c, call:
+        // update_beliefs(direction, corner_readings);
+
+        // If your localization indicates loss or ambiguous belief, attempt robot_localization (not shown)
+        // Reset attempt counter after a successful step
+        attempts = 0;
+    }
+
+    // Arrived at target
+    BT_all_stop(1);
+    printf("Reached target at (%d,%d)\n", target_x, target_y);
+    return 1;
+}
 
 void calibrate_sensor(void)
 {
