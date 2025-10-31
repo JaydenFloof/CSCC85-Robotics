@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <float.h>
+#include <math.h>
 #include <pthread.h>
 
 #define TIME_STEP 32
@@ -50,6 +51,13 @@
 #define MIN_BELIEF 0.0002                     // Minimum belief for a particle.
 #define PARTICLE_STEP (1.0 / NUM_PARTICLES)   // Particle step.
 #define RAND_OFS (drand48() * PARTICLE_STEP)  // Random offset.
+
+/* Particle component. */
+typedef enum {
+  X, 
+  Y, 
+  TH
+} PART_COMPONENT;
 
 //#define __DEBUG 0    // Turn on/off the debug print statements
                        // use step-by-step simulation for this!
@@ -174,9 +182,9 @@ void particle_resample(float *part, float *bel, int n)
     }
 
     /* Copy new particle with added resampling noise. */
-    new_part[3*i]     = part[3*j]     + ((drand48() - 0.5) * R_NOISE);        // X. 
-    new_part[3*i + 1] = part[3*j + 1] + ((drand48() - 0.5) * R_NOISE);        // Y.
-    new_part[3*i + 2] = part[3*j + 2] + ((drand48() - 0.5) * R_NOISE * 2.0);  // Theta.
+    new_part[3*i + X]  = part[3*j + X]  + ((drand48() - 0.5) * R_NOISE);        // X + resample noise. 
+    new_part[3*i + Y]  = part[3*j + Y]  + ((drand48() - 0.5) * R_NOISE);        // Y + resample noise.
+    new_part[3*i + TH] = part[3*j + TH] + ((drand48() - 0.5) * R_NOISE * 2.0);  // Theta + resample noise.
   }
 
   /* Set new particles. */
@@ -236,8 +244,40 @@ float particle_fitness(float *parts, int i, float *gt, const float *lid, int gt_
   // TO DO: Implement this function to compute and return the belief
   //        value (fitness value) for a particle. 
   
- return 1.0;         // Return the likelihood
+  /* Get theta and log probability. */
+  int best_theta_ofs = 0;         // Best angular offset of the ground truth, `gt`.
+  float best_log_prob = -FLT_MAX; // Best log probability found when testing theta offsets from the ground truth, `gt`.
+  for (size_t i = 0; i < gt_samples; i++) {
+    float log_prob = 0.0;
+    for (size_t j = 0; j < lid_samples; j++) {
+      float lid_d = lid[j];
+
+      /* Light error detection: Skip obviously wrong lidar images. */
+      if (lid_d <= 0.0 || !isfinite(lid_d)) {
+        continue;
+      }
+
+      /* Compute log probability using Gaussian sum. */
+      float diff = lid_d - gt[(i + j) % gt_samples];
+      float exponent = -(pow(diff, 2)) / (2.0 * pow(noise, 2));
+      log_prob += exponent;
+    }
+
+    /* Save best (log) likelihood. */
+    if (log_prob > best_log_prob) {
+      best_log_prob = log_prob;
+      best_theta_ofs = i;
+    }
+  }
+
+  /* Update particle theta to most likely orientation. */
+  float best_theta = 2.0 * PI * ((float)best_theta_ofs / (float)gt_samples);
+  parts[3*i + TH] = fmodf(best_theta, 2.0 * PI);
+
+  /* Compute belief. */
+  float belief = expf(best_log_prob / lid_samples);
   
+  return fminf(fmaxf(belief, MIN_BELIEF), 1.0);  // Clamp: MIN_BELIEF <= belief <= 1.0
 }
 
 //// YOU DO NOT NEED TO MODIFY ANY CODE BELOW THIS POINT - but you are encouraged
