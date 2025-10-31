@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <float.h>
 #include <pthread.h>
 
 #define TIME_STEP 32
@@ -45,6 +46,11 @@
 #define NUM_PARTICLES 5000     // NUmber of particles in the filter
 #define MAX_SPHERES 300        // Maximum number of spheres to display (reduce if too laggy)
 #define BD 7                   // Minimum image dist. between border and particles
+
+#define MIN_BELIEF 0.0002                     // Minimum belief for a particle.
+#define PARTICLE_STEP (1.0 / NUM_PARTICLES)   // Particle step.
+#define RAND_OFS (drand48() * PARTICLE_STEP)  // Random offset.
+
 //#define __DEBUG 0    // Turn on/off the debug print statements
                        // use step-by-step simulation for this!
 
@@ -125,6 +131,61 @@ void particle_resample(float *part, float *bel, int n)
   // you'll need to create a temporary array - be sure to free it! don't leave
   // memory leaks because this function will be called lots of times, it will
   // eat up your memory if you're not careful.
+  
+  /* Get normalized beliefs. */
+  float sum_bel = 0.0;
+  for (size_t i = 0; i < n; i++) {
+    sum_bel += bel[i];
+  }
+  if (sum_bel == 0.0) {
+    sum_bel = MIN_BELIEF;
+  }
+
+  float *norm_bel = (float *) calloc(n, sizeof(float));
+  for (size_t i = 0; i < n; i++) {
+    norm_bel[i] = bel[i] / sum_bel;
+  }
+
+  /* 
+    Compute CDF.
+    Inspired by: https://stonesoup.readthedocs.io/en/v1.5/auto_tutorials/sampling/ResamplingTutorial.html
+  */
+  float *cdf = (float *) calloc(n, sizeof(float));
+  cdf[0] = norm_bel[0];
+  for (size_t i = 1; i < n; i++) {
+    cdf[i] = cdf[i - 1] + norm_bel[i];
+  }
+  cdf[n - 1] = 1.0;
+
+  /* Resample. */
+  float *new_part = (float *) calloc(3 * n, sizeof(float));
+  int j = 0;
+  float c = cdf[0];
+  for (size_t i = 0; i < n; i++) {
+    float p_target = RAND_OFS + (i * PARTICLE_STEP); // Target probability threshold.
+
+    /* 
+      Find particle with minimum (cumulative) probability 
+      exceeding the target probability. 
+    */
+    while (p_target > c && j < n - 1) {
+      j++;
+      c = cdf[j];
+    }
+
+    /* Copy new particle with added resampling noise. */
+    new_part[3*i]     = part[3*j]     + ((drand48() - 0.5) * R_NOISE);        // X. 
+    new_part[3*i + 1] = part[3*j + 1] + ((drand48() - 0.5) * R_NOISE);        // Y.
+    new_part[3*i + 2] = part[3*j + 2] + ((drand48() - 0.5) * R_NOISE * 2.0);  // Theta.
+  }
+
+  /* Set new particles. */
+  memcpy(part, new_part, 3 * n * sizeof(float));
+
+  /* Free heap. */
+  free(new_part);
+  free(norm_bel);
+  free(cdf);
   
   return;  
 }
