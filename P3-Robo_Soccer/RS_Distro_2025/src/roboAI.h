@@ -151,4 +151,47 @@ struct displayList *clearDP(struct displayList *head);
    playing functionality below.
 *****************************************************************************/
 
+/* State enums. */
+typedef enum {
+  PENALTY_TARGET_LOST, 
+  PENALTY_TARGET_FOUND, 
+  PENALTY_TARGET_REACHED, 
+  PENALTY_GOAL_ALIGNED, 
+  PENALTY_KICKED, 
+
+  STATE_SUCCESS
+} State_Enum;
+
+/* Turn direction. */
+typedef enum {
+  LEFT  = -1, 
+  RIGHT =  1
+} TURN_DIR;
+
+/* PID controller. */
+typedef struct {
+  double p; // Proportional error.
+  double d; // Differential error.
+  double i; // Integral error.
+} PIDc;
+
+/* Penalty. */
+void penalty_target_acquire(struct RoboAI *ai);
+void penalty_target_approach(struct RoboAI *ai);
+void penalty_align_goal(struct RoboAI *ai);
+void penalty_kick(struct RoboAI *ai);
+void penalty_end(struct RoboAI *ai);
+
+/* State. */
+void state_error_raise(void);
+void state_error_reset(void);
+
+/* PID. */
+double pid_int_err_update(double curr_err);
+double pid_u(PIDc *pid, double curr_err, double diff_err, double int_err);
+
+/* Vector utils. */
+double norm(double x, double y);
+double signed_angle(double x1, double y1, double x2, double y2);
+
 #endif

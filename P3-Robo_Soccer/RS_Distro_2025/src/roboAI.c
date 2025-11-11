@@ -5,7 +5,7 @@
   to the robot.
 
   Please read all comments in this file, and add code where needed to
-  implement your game playing logic. 
+  implement your game playing logic.
 
   Things to consider:
 
@@ -15,7 +15,7 @@
   - Try to predict what your oponent will do
   - Use feedback from the camera
 
-  What your code should not do: 
+  What your code should not do:
 
   - Attack the opponent, or otherwise behave aggressively toward the
     oponent
@@ -32,6 +32,97 @@
 extern int sx;              // Get access to the image size from the imageCapture module
 extern int sy;
 int laggy=0;
+
+#include <stdbool.h>
+
+#define PID_BUFSIZE 5  // Buffer size for a PID controller.
+#define STATE_AMT 300  // Amount of possible states.
+
+/* Penalty parameters. */
+#define PEN_RUN_UP_DIST 200.0  // Distance to begin approaching the ball.
+#define PEN_APPROACH_STOP 40.0 // Distance to stop approaching the ball.
+#define PEN_PWR -20            // Motor power when approaching target.
+#define PEN_TURN_PWR 20        // Turning power when approaching target.
+#define PEN_GOAL_ALIGN 0.25    // Maximum angle error allowed in goal alignment.
+#define PEN_KICK_FRAMES 7      // Amount of frames the robot drives forward for the penalty kick.
+#define OOB_SIZE 50.0          // Amount of pixels to consider the target position to be out-of-bounds.
+
+#define TURN_THRESHOLD 0.4  // Minimum angle error to rotate in place (without driving).
+
+int TRANSITION_TABLE[STATE_AMT][20];                // Transition table.
+void (*TRANSITIONS[STATE_AMT])(struct RoboAI *ai);  // Table of transition functions.
+
+/*
+  True, if an error was encountered in some state. 
+  Must be reset manually after the error is resolved.
+*/ 
+bool STATE_ERROR = false;
+
+/* Tracked blobs. */
+double spx = 0.0; // Self position X.
+double spy = 0.0; // Self position Y.
+double sdx = 0.0; // Self direction X.
+double sdy = 0.0; // Self direction Y.
+double smx = 0.0; // Self motion X.
+double smy = 0.0; // Self motion Y.
+double opx = 0.0; // Opponent position X.
+double opy = 0.0; // Opponent position Y.
+double bpx = 0.0; // Ball position X.
+double bpy = 0.0; // Ball position Y.
+
+/* Target position. */
+double target_x = 0.0;  // Target position X.
+double target_y = 0.0;  // Target position Y.
+
+double GOAL_X = -1.0; // Goal position X.
+
+/* Previous frame data. */
+struct {
+  double err; // Previous differential error.
+  double sdx; // Previous self direction X.
+  double sdy; // Previous self direction Y.
+  double spx; // Previous self position X.
+  double spy; // Previous self position Y.
+  double bpx; // Previous ball position X.
+  double bpy; // Previous ball position X.
+} prev = { 0.0 };
+
+int penalty_kick_frame = 0; // Current penalty kick frame.
+
+/*
+  Initial display list. 
+  (Heard from a team this helps with some display bug.)
+*/ 
+struct displayList *init_DPhead;
+
+double INT_ERR[PID_BUFSIZE];  // Integral error sliding window.
+
+/*
+  Shifts the sliding window of the integral error and 
+  sets the latest error to `curr_err`.
+
+  Returns the sum of the previous errors.
+*/
+double pid_int_err_update(double curr_err) {
+  double sum = 0.0;
+
+  for (size_t k = PID_BUFSIZE - 1; k > 0; k--) {
+    INT_ERR[k] = INT_ERR[k-1];
+    sum += INT_ERR[k];
+  }
+  INT_ERR[0] = curr_err;
+
+  return sum;
+}
+
+/*
+  Computes the PID output "u" of PID controller `pid`, 
+  given the current, derivative, and integral error values, 
+  `curr_err`, `diff_err`, `int_err`, respectively.
+*/
+double pid_u(PIDc *pid, double curr_err, double diff_err, double int_err) {
+  return pid->p * curr_err + pid->d * diff_err + pid->i * int_err;
+}
 
 /**************************************************************
  * Display List Management
@@ -527,7 +618,7 @@ void id_bot(struct RoboAI *ai, struct blob *blobs)
  * ******************************************************************************/
 
 /*********************************************************************************
- * Routine to initialize the AI 
+ * Routine to initialize the AI
  * *******************************************************************************/
 int setupAI(int mode, int own_col, struct RoboAI *ai)
 {
@@ -598,6 +689,20 @@ int setupAI(int mode, int own_col, struct RoboAI *ai)
  ai->st.oppID=0;
  ai->st.ballID=0;
  ai->DPhead=NULL;
+
+  /* Penalty functions. */
+  TRANSITIONS[101] = penalty_target_acquire;
+  TRANSITIONS[102] = penalty_target_approach;
+  TRANSITIONS[103] = penalty_align_goal;
+  TRANSITIONS[104] = penalty_kick;
+  TRANSITIONS[105] = penalty_end;
+
+  TRANSITION_TABLE[101][PENALTY_TARGET_LOST]    = 101;  // If target not found, try again.
+  TRANSITION_TABLE[101][PENALTY_TARGET_FOUND]   = 102;  // If target found, proceed to target.
+  TRANSITION_TABLE[102][PENALTY_TARGET_REACHED] = 103;  // If target reached, align with goal.
+  TRANSITION_TABLE[103][PENALTY_GOAL_ALIGNED]   = 104;  // If aligned with goal, kick ball.
+  TRANSITION_TABLE[104][PENALTY_KICKED]         = 105;  // If ball kicked, halt motors and exit.
+
  fprintf(stderr,"Initialized!\n");
 
  return(1);
@@ -749,34 +854,57 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
 
          
   }
-  
-  // Initialize BotInfo structures
-   
- }
- else
- {
-  /****************************************************************************
-   TO DO:
-   You will need to replace this 'catch-all' code with actual program logic to
-   implement your bot's state-based AI.
 
-   After id_bot() has successfully completed its work, the state should be
-   1 - if the bot is in SOCCER mode
-   101 - if the bot is in PENALTY mode
-   201 - if the bot is in CHASE mode
+    // Initialize BotInfo structures
+    init_DPhead = ai->DPhead;
+  }
+  else
+  {
+    /****************************************************************************
+     TO DO:
+     You will need to replace this 'catch-all' code with actual program logic to
+     implement your bot's state-based AI.
 
-   Your AI code needs to handle these states and their associated state
-   transitions which will determine the robot's behaviour for each mode.
+     After id_bot() has successfully completed its work, the state should be
+     1 - if the bot is in SOCCER mode
+     101 - if the bot is in PENALTY mode
+     201 - if the bot is in CHASE mode
 
-   Please note that in this function you should add appropriate functions below
-   to handle each state's processing, and the code here should mostly deal with
-   state transitions and with calling the appropriate function based on what
-   the bot is supposed to be doing.
-  *****************************************************************************/
-//  fprintf(stderr,"Just trackin'!\n");	// bot, opponent, and ball.
-//  track_agents(ai,blobs);		// Currently, does nothing but endlessly track
- }
+     Your AI code needs to handle these states and their associated state
+     transitions which will determine the robot's behaviour for each mode.
 
+     Please note that in this function you should add appropriate functions below
+     to handle each state's processing, and the code here should mostly deal with
+     state transitions and with calling the appropriate function based on what
+     the bot is supposed to be doing.
+    *****************************************************************************/
+    //  fprintf(stderr,"Just trackin'!\n");	// bot, opponent, and ball.
+    ai->DPhead = init_DPhead;
+    track_agents(ai,blobs);		// Currently, does nothing but endlessly track
+
+    /* If goal position unknown, early exit. */
+    if (GOAL_X == -1.0) {
+      fprintf(stderr, "error: goal not found");
+      return;
+    }
+
+    /* Perform action according to current transition function. */
+    (*TRANSITIONS[ai->st.state])(ai);
+
+    /* Debug: Add graphical markers to landmarks of interest. */
+    ai->DPhead = addCross(ai->DPhead, target_x, target_y, 30, 0.0, 0.0, 255.0);         // Target position for penalties.
+    ai->DPhead = addCross(ai->DPhead, GOAL_X, sy/2, 30, 0.0, 255.0, 0.0);               // Center of enemy goal.
+    ai->DPhead = addVector(ai->DPhead, spx, spy, sdx, sdy, 300, 255.0, 0.0, 0.0);       // Robot's facing direction.
+    ai->DPhead = addCross(ai->DPhead, OOB_SIZE, OOB_SIZE, OOB_SIZE, 255.0, 0.0, 255.0); // OoB marker.
+    
+    /* Set previous frame data. */
+    prev.spx = spx;
+    prev.spy = spy;
+    prev.sdx = sdx;
+    prev.sdy = sdy;
+    prev.bpx = bpx;
+    prev.bpy = bpy;
+  }
 }
 
 /**********************************************************************************
@@ -793,4 +921,164 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
  there.
 **********************************************************************************/
 
+/* 
+  Acquires the target x,y position to be reached by the EV3 robot 
+  during a penalty kick.
 
+  The target position must necessarily be at a sufficient distance 
+  from the ball, so as to not unintentionally move the ball.
+*/
+void penalty_target_acquire(struct RoboAI *ai) {
+  state_error_reset();
+
+  /* Compute vector from goal center to ball. */
+  double vx = bpx - GOAL_X;
+  double vy = bpy - (sy / 2);
+  double dist = norm(vx, vy);
+
+  /* Update target position. */
+  target_x = bpx + (PEN_RUN_UP_DIST) * (vx / dist);
+  target_y = bpy + (PEN_RUN_UP_DIST) * (vy / dist);
+
+  /* Check that the target position is not out-of-bounds. */
+  STATE_ERROR = ( 
+    target_x <= OOB_SIZE || target_x >= (sx - OOB_SIZE) || 
+    target_y <= OOB_SIZE || target_y >= (sy - OOB_SIZE)
+  );
+
+  /* Update state. */
+  if (!STATE_ERROR) {
+    fprintf(stderr, "Penalty target acquired: Approaching target...\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_TARGET_FOUND];
+  } else {
+    fprintf(stderr, "error: penalty target not found\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_TARGET_LOST];
+  }
+
+  return;
+}
+
+/*
+  Approaches the target position during a penalty.
+*/
+void penalty_target_approach(struct RoboAI *ai) {
+  state_error_reset();
+
+  // TODO: Tune PID.
+  PIDc pid = {
+    .p = 100.0, 
+    .d = 100.0, 
+    .i = 100.0
+  };
+
+  if (norm(target_x - spx, target_y - spy) <= PEN_APPROACH_STOP) {  // Target reached.
+    BT_all_stop(1);
+
+    fprintf(stderr, "Target reached: Aligning with goal...\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_TARGET_REACHED];
+  } else {  // Approach target.
+    /* Compute vector from robot to target. */
+    double vx = target_x - spx;
+    double vy = target_y - spy;
+
+    ai->DPhead = addVector(ai->DPhead, spx, spy, vx, vy, 200, 0.0, 255.0, 0.0);                                       // Robot to target position.
+    ai->DPhead = addVector(ai->DPhead, spx, spy, GOAL_X - spx, (sy / 2) - spy, 1000, 255.0, 255.0, 0.0);  // Robot to goal center.
+
+    double curr_err = signed_angle(sdx, sdy, vx, vy);
+    if ((PI/2) - abs(curr_err) < TURN_THRESHOLD) { // Way off the correct angle: Rotate in place.
+      fprintf(stderr, "Ignoring specialized PID turn: Rotating without driving...\n");
+
+      int turn_dir = (curr_err < 0) ? RIGHT : LEFT;
+      BT_turn(MOTOR_D, turn_dir * PEN_TURN_PWR, MOTOR_A, turn_dir * -(PEN_TURN_PWR));
+    } else {  // Angle is close enough: Rotate while driving.
+      double diff_err = curr_err - prev.err;
+      double int_err = pid_int_err_update(curr_err);
+      prev.err = curr_err;
+
+      double u = pid_u(&pid, curr_err, diff_err, int_err);  // -PI <= u <= PI
+      
+      /* -100.0 <= left_pwr, right_pwr <= 100.0 */
+      double left_pwr  = fmin(100.0, fmax(-100.0, PEN_PWR - u));
+      double right_pwr = fmin(100.0, fmax(-100.0, PEN_PWR + u));
+      BT_turn(MOTOR_D, left_pwr, MOTOR_A, right_pwr);
+    }
+  }
+
+  return;
+}
+
+/*
+  Align the EV3 robot with the goal during a penalty.
+*/
+void penalty_align_goal(struct RoboAI *ai) {
+  state_error_reset();
+
+  double angle = signed_angle(sdx, sdy, GOAL_X - spx, (sy / 2) - spy);
+  if (abs(angle) <= PEN_GOAL_ALIGN) {  // Goal-aligned.
+    BT_all_stop(1);
+    
+    fprintf(stderr, "Aligned to goal: Kicking ball...\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_GOAL_ALIGNED];
+  } else {  // Turn in place.
+    int turn_dir = (angle < 0) ? RIGHT : LEFT;
+    BT_turn(MOTOR_D, turn_dir * PEN_TURN_PWR, MOTOR_A, turn_dir * -PEN_TURN_PWR);
+  }
+
+  return;
+}
+
+/*
+  Perform a penalty kick.
+*/
+void penalty_kick(struct RoboAI *ai) {
+  state_error_reset();
+
+  fprintf(stderr, "Penalty kick frame: %d\n", penalty_kick_frame);
+  if (penalty_kick_frame > PEN_KICK_FRAMES) { // Kick complete.
+    penalty_kick_frame = 0;
+    BT_all_stop(1);
+    
+    fprintf(stderr, "Kick complete: Halting motors and exiting...\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_KICKED];
+  } else {  // Accelerate into the ball proportional to the penalty kick frame.
+    /* Base speed + (10 * penalty_frames_elapsed) */
+    BT_turn(MOTOR_D, -40 - (10 * penalty_kick_frame), MOTOR_A, -40 - (10 * penalty_kick_frame));
+    penalty_kick_frame++;
+  }
+
+  return;
+}
+
+/*
+  Halts all motors and exits the roboSoccer program.
+*/
+void penalty_end(struct RoboAI *ai) {
+  BT_all_stop(1);
+  exit(1);
+}
+
+/*
+  Sets the state error flag to true.
+*/
+void state_error_raise(void) { STATE_ERROR = true; }
+
+/*
+  Sets the state error flag to false.
+*/
+void state_error_reset(void) { STATE_ERROR = false; }
+
+/*
+  Compute the norm of `x` and `y`.
+*/
+double norm(double x, double y) {
+  return sqrt(pow(x, 2) + pow(y, 2));
+}
+
+/*
+  Returns the signed angle between (`x0`,`y0`) and (`x1`, `y1`).
+
+  Range: [-PI, PI]
+*/
+double signed_angle(double x0, double y0, double x1, double y1) {
+  return atan2(x0*y1 - x1*y0, x0*x1 + y0*y1);
+}
