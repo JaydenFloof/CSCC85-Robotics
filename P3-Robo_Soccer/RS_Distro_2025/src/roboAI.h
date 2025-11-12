@@ -151,6 +151,13 @@ struct displayList *clearDP(struct displayList *head);
    playing functionality below.
 *****************************************************************************/
 
+/* Mode enums. */
+typedef enum {
+  MODE_SOCCER, 
+  MODE_PENALTY, 
+  MODE_CHASE
+} Mode_Enum;
+
 /* State enums. */
 typedef enum {
   PENALTY_TARGET_LOST, 
@@ -183,15 +190,18 @@ void penalty_kick(struct RoboAI *ai);
 void penalty_end(struct RoboAI *ai);
 
 /* State. */
+void state_world_update(struct RoboAI *ai);
 void state_error_raise(void);
 void state_error_reset(void);
+void state_perror_raise(const char *s);
 
 /* PID. */
+void pid_int_err_reset(void);
 double pid_int_err_update(double curr_err);
 double pid_u(PIDc *pid, double curr_err, double diff_err, double int_err);
 
 /* Vector utils. */
 double norm(double x, double y);
-double signed_angle(double x1, double y1, double x2, double y2);
+double signed_angle(double x0, double y0, double x1, double y1);
 
 #endif

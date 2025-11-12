@@ -47,7 +47,10 @@ int laggy=0;
 #define PEN_KICK_FRAMES 7      // Amount of frames the robot drives forward for the penalty kick.
 #define OOB_SIZE 50.0          // Amount of pixels to consider the target position to be out-of-bounds.
 
-#define TURN_THRESHOLD 0.4  // Minimum angle error to rotate in place (without driving).
+/* Thresholds. */
+#define TURN_THRESHOLD 0.4            // Minimum angle error to rotate in place (without driving).
+#define WORLD_ALIGN_THRESHOLD 1.5     // Maximum angle error allowed in world state alignment.
+#define HEADING_STABILITY_THRESHOLD 3 // Amount of frames with correct heading direction to be considered driving forward.
 
 int TRANSITION_TABLE[STATE_AMT][20];                // Transition table.
 void (*TRANSITIONS[STATE_AMT])(struct RoboAI *ai);  // Table of transition functions.
@@ -74,7 +77,7 @@ double bpy = 0.0; // Ball position Y.
 double target_x = 0.0;  // Target position X.
 double target_y = 0.0;  // Target position Y.
 
-double GOAL_X = -1.0; // Goal position X.
+double GOAL_X = -1.0; // Enemy goal position X.
 
 /* Previous frame data. */
 struct {
@@ -87,7 +90,12 @@ struct {
   double bpy; // Previous ball position X.
 } prev = { 0.0 };
 
-int penalty_kick_frame = 0; // Current penalty kick frame.
+/* Robot states. */
+bool correct_heading_drive = false; // True, if the EV3 robot is driving forward in the correct heading direction.
+
+/* Frame counters. */
+int penalty_kick_frame = 0;    // Current penalty kick frame.
+int heading_stable_frames = 0; // Number of frames the heading direction was correct.
 
 /*
   Initial display list. 
@@ -96,6 +104,15 @@ int penalty_kick_frame = 0; // Current penalty kick frame.
 struct displayList *init_DPhead;
 
 double INT_ERR[PID_BUFSIZE];  // Integral error sliding window.
+
+/* Sets all integral error values to zero. */
+void pid_int_err_reset(void) {
+  for (size_t i = 0; i < PID_BUFSIZE; i++) {
+    INT_ERR[i] = 0.0;
+  }
+
+  return;
+}
 
 /*
   Shifts the sliding window of the integral error and 
@@ -882,6 +899,9 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
     ai->DPhead = init_DPhead;
     track_agents(ai,blobs);		// Currently, does nothing but endlessly track
 
+    /* State data acquisition. */
+    state_world_update(ai);
+
     /* If goal position unknown, early exit. */
     if (GOAL_X == -1.0) {
       fprintf(stderr, "error: goal not found");
@@ -1057,6 +1077,107 @@ void penalty_end(struct RoboAI *ai) {
   exit(1);
 }
 
+/* Updates the state variables according to world events. */
+void state_world_update(struct RoboAI *ai) {
+  state_error_reset();
+
+  /* Sanity check. */
+  if (ai == NULL) {
+    state_perror_raise("`ai` struct is null");
+  }
+  
+  int game_mode = ai->st.state / 100;
+
+  /* Set goal position, if uninitialized. */
+  if (GOAL_X == -1.0) {
+    /* 
+      This is a hack. 
+
+      If the ally goal is on the left side, then 
+      the opponent goal is assumed to be *all the way* 
+      on the right side of the video image, and vice versa.
+    */
+    GOAL_X = (ai->st.side) ? 0 : sx;
+    fprintf(stderr, "Opponent goal registered as: %d\n", (int)GOAL_X);
+
+    pid_int_err_reset();
+  }
+
+  /* Set ally robot data. */
+  if (ai->st.selfID && ai->st.self != NULL) {
+    /* Set position and heading direction. */
+    spx = ai->st.self->cx;
+    spy = ai->st.self->cy;
+    smx = ai->st.self->mx;
+    smy = ai->st.self->my;
+
+    /* Set direction vector. */
+    if (!sdx && !sdy) { // Unset direction vector (1st frame only).
+      /* Check if facing direction aligns with the center of the field. */
+      double flip = (abs(signed_angle(sx/2 - spx, sy/2 - spy, ai->st.self->dx, ai->st.self->dy)) < WORLD_ALIGN_THRESHOLD)
+                  ?  1.0
+                  : -1.0;
+      sdx = ai->st.self->dx * flip;
+      sdy = ai->st.self->dy * flip;
+
+      fprintf(stderr, "Direction vector at 1st frame: (%f, %f)\n", sdx, sdy);
+    } else {  // Previous direction vector value exists.
+      /* If driving forward, set direction vector according to heading direction. */
+      if (correct_heading_drive && abs(norm(spx - prev.spx, spy - prev.spy)) > 10) {
+        /* Check if facing direction aligns with the heading direction. */
+        double flip = (abs(signed_angle(ai->st.self->mx, ai->st.self->my, ai->st.self->dx, ai->st.self->dy)) < WORLD_ALIGN_THRESHOLD)
+                    ?  1.0
+                    : -1.0;
+        sdx = ai->st.self->dx * flip;
+        sdy = ai->st.self->dy * flip;
+        
+        heading_stable_frames = 0;  // Reset, since we know we're driving forward.
+
+        fprintf(stderr, "Direction vector set according to *heading direction*\n");
+      } else {  // If not driving forward, set direction vector according to its earliest known value.
+        double flip = (abs(signed_angle(prev.sdx, prev.sdy, ai->st.self->dx, ai->st.self->dy)) < WORLD_ALIGN_THRESHOLD)
+                    ?  1.0
+                    : -1.0;
+        sdx = ai->st.self->dx * flip;
+        sdy = ai->st.self->dy * flip;
+
+        fprintf(stderr, "Direction vector set according to *past direction vector*\n");
+      }
+
+      fprintf(stderr, "Driving forward?: %s\n", (correct_heading_drive) ? "true" : "false");
+      fprintf(stderr, "Current direction vector: (%f, %f)\n", sdx, sdy);
+      
+      correct_heading_drive = false;  // Reset to prepare for next frame.
+    }
+  } else {
+    state_perror_raise("couldn't find ally robot");
+  }
+
+  /* Set ball location. */
+  if (ai->st.ballID && ai->st.ball != NULL) {
+    bpx = ai->st.ball->cx;
+    bpy = ai->st.ball->cy;
+  } else {
+    state_perror_raise("couldn't find ball");
+  }
+
+  /* Set opponent location (if appropriate for the game mode). */
+  if (game_mode == MODE_SOCCER) {
+    if (ai->st.oppID && ai->st.opp != NULL) {
+      opx = ai->st.opp->cx;
+      opy = ai->st.opp->cy;
+    } else {
+      state_perror_raise("couldn't find opponent robot in soccer mode");
+    }
+  } else {
+    if (ai->st.oppID && ai->st.opp != NULL) {
+      state_perror_raise("opponent robot detected in solo game mode");
+    }
+  }
+
+  return;
+}
+
 /*
   Sets the state error flag to true.
 */
@@ -1066,6 +1187,17 @@ void state_error_raise(void) { STATE_ERROR = true; }
   Sets the state error flag to false.
 */
 void state_error_reset(void) { STATE_ERROR = false; }
+
+/*
+  Sets the state error flag to true 
+  and prints an error message `s`.
+*/
+void state_perror_raise(const char *s) {
+  fprintf(stderr, "error: %s\n", s);
+  state_error_raise();
+
+  return;
+}
 
 /*
   Compute the norm of `x` and `y`.
