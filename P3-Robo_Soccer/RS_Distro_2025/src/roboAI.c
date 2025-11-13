@@ -715,10 +715,10 @@ int setupAI(int mode, int own_col, struct RoboAI *ai)
   TRANSITIONS[105] = penalty_end;
 
   TRANSITION_TABLE[101][PENALTY_TARGET_LOST]    = 101;  // If target not found, try again.
-  TRANSITION_TABLE[102][PENALTY_TARGET_FOUND]   = 102;  // If target found, proceed to target.
-  TRANSITION_TABLE[103][PENALTY_TARGET_REACHED] = 103;  // If target reached, align with goal.
-  TRANSITION_TABLE[104][PENALTY_GOAL_ALIGNED]   = 104;  // If aligned with goal, kick ball.
-  TRANSITION_TABLE[105][PENALTY_KICKED]         = 105;  // If ball kicked, halt motors and exit.
+  TRANSITION_TABLE[101][PENALTY_TARGET_FOUND]   = 102;  // If target found, proceed to target.
+  TRANSITION_TABLE[102][PENALTY_TARGET_REACHED] = 103;  // If target reached, align with goal.
+  TRANSITION_TABLE[103][PENALTY_GOAL_ALIGNED]   = 104;  // If aligned with goal, kick ball.
+  TRANSITION_TABLE[104][PENALTY_KICKED]         = 105;  // If ball kicked, halt motors and exit.
 
  fprintf(stderr,"Initialized!\n");
 
