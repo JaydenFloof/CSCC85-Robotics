@@ -42,10 +42,18 @@ int laggy=0;
 #define PEN_RUN_UP_DIST 200.0  // Distance to begin approaching the ball.
 #define PEN_APPROACH_STOP 40.0 // Distance to stop approaching the ball.
 #define PEN_PWR -20            // Motor power when approaching target.
-#define PEN_TURN_PWR 20        // Turning power when approaching target.
+#define PEN_TURN_PWR 20        // Turning power  when approaching target.
 #define PEN_GOAL_ALIGN 0.25    // Maximum angle error allowed in goal alignment.
 #define PEN_KICK_FRAMES 7      // Amount of frames the robot drives forward for the penalty kick.
 #define OOB_SIZE 50.0          // Amount of pixels to consider the target position to be out-of-bounds.
+
+/*Chase Parameters*/
+#define CHASE_KICK_DIST 50 //Distance From which Chase will go from Approach state to kick state
+#define CHASE_TURN_PWR 20 //Motor Power for turn in Chase
+#define CHASE_PWR -20 //Motor Power For Approaching Target
+#define CHASE_BALL_ALIGN 0.25 //Maximum angle error allowed in ball alignment.
+#define CHASE_KICK_PWR 50 //Motor Power for kicking the ball
+#define CHASE_KICK_FRAMES 7 //Amount of Frames Chase will kick for
 
 /* Thresholds. */
 #define TURN_THRESHOLD 0.4            // Minimum angle error to rotate in place (without driving).
@@ -95,6 +103,7 @@ bool correct_heading_drive = false; // True, if the EV3 robot is driving forward
 
 /* Frame counters. */
 int penalty_kick_frame = 0;    // Current penalty kick frame.
+int chase_kick_frame = 0;
 int heading_stable_frames = 0; // Number of frames the heading direction was correct.
 
 /*
@@ -718,7 +727,20 @@ int setupAI(int mode, int own_col, struct RoboAI *ai)
   TRANSITION_TABLE[101][PENALTY_TARGET_FOUND]   = 102;  // If target found, proceed to target.
   TRANSITION_TABLE[102][PENALTY_TARGET_REACHED] = 103;  // If target reached, align with goal.
   TRANSITION_TABLE[103][PENALTY_GOAL_ALIGNED]   = 104;  // If aligned with goal, kick ball.
-  TRANSITION_TABLE[104][PENALTY_KICKED]         = 105;  // If ball kicked, halt motors and exit.
+  TRANSITION_TABLE[10][PENALTY_KICKED]         = 105;  // If ball kicked, halt motors and exit.
+
+  /*Chase functions*/
+  TRANSITIONS[201] = chase_approach;
+  TRANSITIONS[202] = chase_align_ball;
+  TRANSITIONS[203] = chase_kick_ball;
+
+  TRANSITION_TABLE[201][CHASE_BALL_FAR] = 201;
+  TRANSITION_TABLE[201][CHASE_BALL_CLOSE] = 202;
+  TRANSITION_TABLE[202][CHASE_BALL_ALIGNED] = 203;
+  TRANSITION_TABLE[203][CHASE_KICKED] = 201;
+
+
+
 
  fprintf(stderr,"Initialized!\n");
 
@@ -1076,6 +1098,98 @@ void penalty_end(struct RoboAI *ai) {
   BT_all_stop(1);
   exit(1);
 }
+
+/*
+  Approaches Ball for Chase
+*/
+void chase_approach(struct RoboAI *ai){
+  state_error_reset();
+
+  /*Set PID*/
+  PIDc pid = {
+    .p = 1,
+    .d = 0.05,
+    .i = 0.01
+  };
+
+  /*Set target position to the position of the ball*/
+  target_x = bpx;
+  target_y = bpy;
+
+  /*Make sure the ball position is not OOB (NOT SURE if this is possible)*/
+  STATE_ERROR = (
+    target_x <= OOB_SIZE || target_x >= (sx - OOB_SIZE) ||
+    target_y <= OOB_SIZE || target_y >= (sy - OOB_SIZE)
+  );
+
+  /*Approcah Ball if Not close to ball*/
+  if (norm(target_x - spx, target_y - spy) <= CHASE_KICK_DIST) { //If close enough to ball to kick
+    BT_all_stop(1); //TODO: Might want to Remove this
+    fprintf(stderr, "Target reached: Going for Kick.\n");
+
+    ai->st.state = TRANSITION_TABLE[ai->st.state][CHASE_BALL_CLOSE];
+  } else { // if not close enough to ball to kick
+    /* Compute vector from robot to target (ball). */
+    double vx = target_x - spx;
+    double vy = target_y - spy;
+
+    ai->DPhead = addVector(ai->DPhead, spx, spy, vx, vy, 200, 0.0, 255.0, 0.0);// Robot to target position.
+
+    double curr_err = sign_angle(sdx, sdy, vx, vy);
+    if ((PI/2) - abs(curr_err) < TURN_THRESHOLD) { // Way off the correct angle: Rotate in place.
+      fprintf(stderr, "Ignoring specialized PID turn: Rotating without driving...\n");
+
+      int turn_dir = (curr_err < 0) ? RIGHT : LEFT;
+      BT_turn(MOTOR_D, turn_dir * CHASE_TURN_PWR, MOTOR_A, turn_dir * - (CHASE_TURN_PWR));
+    } else {  // Angle is close enough: Rotate while driving.
+      double diff_err = curr_err - prev.err;
+      double int_err = pid_int_err_update(curr_err);
+      prev.err = curr_err;
+
+      double u = pid_u(&pid, curr_err, diff_err, int_err);  // -PI <= u <= PI
+      
+      /* -100.0 <= left_pwr, right_pwr <= 100.0 */
+      double left_pwr  = fmin(100.0, fmax(-100.0, CHASE_PWR - u));
+      double right_pwr = fmin(100.0, fmax(-100.0, CHASE_PWR + u));
+      BT_turn(MOTOR_D, left_pwr, MOTOR_A, right_pwr);
+    }
+    
+    return;
+  }
+  
+}
+
+void chase_align_ball(struct RoboAI *ai) {
+  state_error_reset();
+
+  double angle = signed_angle(sdx, sdy, target_x - spx, target_y - spy);
+  if (abs(angle) <= CHASE_BALL_ALIGN) { //Aligned with Ball
+    BT_all_stop(1);
+
+    fprintf(stderr, "Aligned to ball.\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][CHASE_BALL_ALIGNED];
+  } else { //turn in place to Align
+    int turn_dir = (angle < 0) ? RIGHT : LEFT;
+    BT_turn(MOTOR_D, turn_dir * CHASE_TURN_PWR, MOTOR_A, turn_dir * -CHASE_TURN_PWR);
+  }
+
+  return;
+}
+
+void chase_kick_ball(struct RoboAI *ai) {
+  state_error_reset();
+   if (chase_kick_frame > CHASE_KICK_FRAMES) { // Kick complete.
+    penalty_kick_frame = 0;
+    BT_all_stop(1);
+    
+    fprintf(stderr, "Kick complete: Halting motors and exiting...\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][CHASE_KICKED];
+   } else { // Kick the ball
+    BT_turn(MOTOR_D, CHASE_KICK_PWR, MOTOR_A, CHASE_KICK_PWR);
+    penalty_kick_frame++;
+   }
+}
+
 
 /* Updates the state variables according to world events. */
 void state_world_update(struct RoboAI *ai) {

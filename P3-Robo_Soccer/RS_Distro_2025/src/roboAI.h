@@ -40,7 +40,7 @@ struct AI_data{
 	// This data structure is used to hold all data relevant to the state of the AI.
 	// This includes, of course, the current state, as well as the status of
 	// our own bot, the opponent (if present), and the ball (if present).
-	// For each agent in the game we keep a pointer to the blob that corresponds
+	// For each agent in the game we keep a pointer to the blob that         sponds
 	// to the agent (see the blob data structure in imageCapture.h), and data
 	// about its old position, as well as current velocity and heading vectors.
 	//
@@ -158,7 +158,7 @@ typedef enum {
   MODE_CHASE
 } Mode_Enum;
 
-/* State enums. */
+/* Penalty State enums. */
 typedef enum {
   PENALTY_TARGET_LOST, 
   PENALTY_TARGET_FOUND, 
@@ -167,7 +167,16 @@ typedef enum {
   PENALTY_KICKED, 
 
   STATE_SUCCESS
-} State_Enum;
+} Penalty_State_Enum;
+
+/*Chase State enums*/
+typedef enum {
+	CHASE_BALL_CLOSE,
+	CHASE_BALL_FAR,
+	CHASE_BALL_ALIGNED,
+	CHASE_KICKED,
+	STATE_SUCCESS
+} Chase_State_Enum;
 
 /* Turn direction. */
 typedef enum {
@@ -188,6 +197,11 @@ void penalty_target_approach(struct RoboAI *ai);
 void penalty_align_goal(struct RoboAI *ai);
 void penalty_kick(struct RoboAI *ai);
 void penalty_end(struct RoboAI *ai);
+
+/*Chase*/
+void chase_approach(struct RoboAI *ai);
+void chase_align_ball(struct RoboAI *ai);
+void chase_kick_ball(struct RoboAI *ai);
 
 /* State. */
 void state_world_update(struct RoboAI *ai);
