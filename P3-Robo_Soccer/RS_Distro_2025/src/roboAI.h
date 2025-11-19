@@ -174,8 +174,7 @@ typedef enum {
 	CHASE_BALL_CLOSE,
 	CHASE_BALL_FAR,
 	CHASE_BALL_ALIGNED,
-	CHASE_KICKED,
-	STATE_SUCCESS
+	CHASE_KICKED
 } Chase_State_Enum;
 
 /* Turn direction. */

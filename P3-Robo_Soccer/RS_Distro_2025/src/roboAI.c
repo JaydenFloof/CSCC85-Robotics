@@ -39,24 +39,24 @@ int laggy=0;
 #define STATE_AMT 300  // Amount of possible states.
 
 /* Penalty parameters. */
-#define PEN_RUN_UP_DIST 200.0  // Distance to begin approaching the ball.
+#define PEN_RUN_UP_DIST 350.0  // Distance to begin approaching the ball.
 #define PEN_APPROACH_STOP 40.0 // Distance to stop approaching the ball.
-#define PEN_PWR -20            // Motor power when approaching target.
+#define PEN_PWR 20            // Motor power when approaching target.
 #define PEN_TURN_PWR 20        // Turning power  when approaching target.
 #define PEN_GOAL_ALIGN 0.25    // Maximum angle error allowed in goal alignment.
-#define PEN_KICK_FRAMES 7      // Amount of frames the robot drives forward for the penalty kick.
+#define PEN_KICK_FRAMES 9      // Amount of frames the robot drives forward for the penalty kick.
 #define OOB_SIZE 50.0          // Amount of pixels to consider the target position to be out-of-bounds.
 
 /*Chase Parameters*/
 #define CHASE_KICK_DIST 50 //Distance From which Chase will go from Approach state to kick state
 #define CHASE_TURN_PWR 20 //Motor Power for turn in Chase
-#define CHASE_PWR -20 //Motor Power For Approaching Target
+#define CHASE_PWR 20 //Motor Power For Approaching Target
 #define CHASE_BALL_ALIGN 0.25 //Maximum angle error allowed in ball alignment.
 #define CHASE_KICK_PWR 50 //Motor Power for kicking the ball
 #define CHASE_KICK_FRAMES 7 //Amount of Frames Chase will kick for
 
 /* Thresholds. */
-#define TURN_THRESHOLD 0.4            // Minimum angle error to rotate in place (without driving).
+#define TURN_THRESHOLD 0.7           // Minimum angle error to rotate in place (without driving).
 #define WORLD_ALIGN_THRESHOLD 1.5     // Maximum angle error allowed in world state alignment.
 #define HEADING_STABILITY_THRESHOLD 3 // Amount of frames with correct heading direction to be considered driving forward.
 
@@ -988,6 +988,11 @@ void penalty_target_acquire(struct RoboAI *ai) {
     target_y <= OOB_SIZE || target_y >= (sy - OOB_SIZE)
   );
 
+  if (target_x <= OOB_SIZE) printf("ERRRR: LEFT boundary hit (x=%f)\n", target_x);
+  else if (target_x >= (sx - OOB_SIZE)) printf("ERRRR: RIGHT boundary hit (x=%f)\n", target_x);
+  else if (target_y <= OOB_SIZE) printf("ERRRR: TOP boundary hit (y=%f)\n", target_y);
+  else if (target_y >= (sy - OOB_SIZE)) printf("ERRRR: BOTTOM boundary hit (y=%f)\n", target_y);
+
   /* Update state. */
   if (!STATE_ERROR) {
     fprintf(stderr, "Penalty target acquired: Approaching target...\n");
@@ -1030,7 +1035,7 @@ void penalty_target_approach(struct RoboAI *ai) {
     if ((PI/2) - abs(curr_err) < TURN_THRESHOLD) { // Way off the correct angle: Rotate in place.
       fprintf(stderr, "Ignoring specialized PID turn: Rotating without driving...\n");
 
-      int turn_dir = (curr_err < 0) ? RIGHT : LEFT;
+      int turn_dir = (curr_err < 0) ? LEFT : RIGHT;
       BT_turn(MOTOR_D, turn_dir * PEN_TURN_PWR, MOTOR_A, turn_dir * -(PEN_TURN_PWR));
     } else {  // Angle is close enough: Rotate while driving.
       double diff_err = curr_err - prev.err;
@@ -1062,7 +1067,7 @@ void penalty_align_goal(struct RoboAI *ai) {
     fprintf(stderr, "Aligned to goal: Kicking ball...\n");
     ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_GOAL_ALIGNED];
   } else {  // Turn in place.
-    int turn_dir = (angle < 0) ? RIGHT : LEFT;
+    int turn_dir = (angle < 0) ? LEFT : RIGHT;
     BT_turn(MOTOR_D, turn_dir * PEN_TURN_PWR, MOTOR_A, turn_dir * -PEN_TURN_PWR);
   }
 
@@ -1084,7 +1089,7 @@ void penalty_kick(struct RoboAI *ai) {
     ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_KICKED];
   } else {  // Accelerate into the ball proportional to the penalty kick frame.
     /* Base speed + (10 * penalty_frames_elapsed) */
-    BT_turn(MOTOR_D, -40 - (10 * penalty_kick_frame), MOTOR_A, -40 - (10 * penalty_kick_frame));
+    BT_turn(MOTOR_D, 40 + (10 * penalty_kick_frame), MOTOR_A, 40 + (10 * penalty_kick_frame));
     penalty_kick_frame++;
   }
 
@@ -1135,11 +1140,11 @@ void chase_approach(struct RoboAI *ai){
 
     ai->DPhead = addVector(ai->DPhead, spx, spy, vx, vy, 200, 0.0, 255.0, 0.0);// Robot to target position.
 
-    double curr_err = sign_angle(sdx, sdy, vx, vy);
+    double curr_err = signed_angle(sdx, sdy, vx, vy);
     if ((PI/2) - abs(curr_err) < TURN_THRESHOLD) { // Way off the correct angle: Rotate in place.
       fprintf(stderr, "Ignoring specialized PID turn: Rotating without driving...\n");
 
-      int turn_dir = (curr_err < 0) ? RIGHT : LEFT;
+      int turn_dir = (curr_err < 0) ? LEFT : RIGHT;
       BT_turn(MOTOR_D, turn_dir * CHASE_TURN_PWR, MOTOR_A, turn_dir * - (CHASE_TURN_PWR));
     } else {  // Angle is close enough: Rotate while driving.
       double diff_err = curr_err - prev.err;
@@ -1169,7 +1174,7 @@ void chase_align_ball(struct RoboAI *ai) {
     fprintf(stderr, "Aligned to ball.\n");
     ai->st.state = TRANSITION_TABLE[ai->st.state][CHASE_BALL_ALIGNED];
   } else { //turn in place to Align
-    int turn_dir = (angle < 0) ? RIGHT : LEFT;
+    int turn_dir = (angle < 0) ? LEFT : RIGHT;
     BT_turn(MOTOR_D, turn_dir * CHASE_TURN_PWR, MOTOR_A, turn_dir * -CHASE_TURN_PWR);
   }
 
