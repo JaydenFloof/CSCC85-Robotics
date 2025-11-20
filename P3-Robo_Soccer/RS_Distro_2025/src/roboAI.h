@@ -25,6 +25,7 @@
 #include "API/btcomm.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 // Change this to match the ports your bots motors are connected to
 #define LEFT_MOTOR MOTOR_D
@@ -156,7 +157,7 @@ typedef enum {
   MODE_SOCCER, 
   MODE_PENALTY, 
   MODE_CHASE
-} Mode_Enum;
+} Mode;
 
 /* State enums. */
 typedef enum {
@@ -166,8 +167,14 @@ typedef enum {
   PENALTY_GOAL_ALIGNED, 
   PENALTY_KICKED, 
 
-  STATE_SUCCESS
-} State_Enum;
+  STATE_SUCCESS, 
+
+  TACTIC_ATTACK, 
+  TACTIC_DEFEND, 
+  TACTIC_SELECT, 
+
+  BALL_FLICK
+} State;
 
 /* Turn direction. */
 typedef enum {
@@ -189,11 +196,35 @@ void penalty_align_goal(struct RoboAI *ai);
 void penalty_kick(struct RoboAI *ai);
 void penalty_end(struct RoboAI *ai);
 
+/* Soccer. */
+void soccer_align_corner(struct RoboAI *ai);
+bool soccer_target_acquire(struct RoboAI *ai);
+void soccer_target_approach(struct RoboAI *ai);
+void soccer_kick(struct RoboAI *ai);
+void soccer_tactic_choose(struct RoboAI *ai);
+void soccer_tactic_attack(struct RoboAI *ai);
+void soccer_tactic_defend(struct RoboAI *ai);
+void soccer_defend_goal(struct RoboAI *ai);
+void soccer_align_goal(struct RoboAI *ai);
+void soccer_align_ball(struct RoboAI *ai);
+bool soccer_should_attack(struct RoboAI *ai);
+void soccer_ram_goal(struct RoboAI *ai);
+bool soccer_curve_around(struct RoboAI *ai);
+void soccer_ball_flick(struct RoboAI *ai);
+
+/* Mode-independant. */
+bool target_approach(struct RoboAI *ai, Mode mode, double target_threshold);
+bool ball_in_motion(struct RoboAI *ai);
+bool stuck_backoff(struct RoboAI *ai);
+
 /* State. */
 void state_world_update(struct RoboAI *ai);
 void state_error_raise(void);
 void state_error_reset(void);
 void state_perror_raise(const char *s);
+
+/* Enemy. */
+void enemy_threshold_reset(void);
 
 /* PID. */
 void pid_int_err_reset(void);
