@@ -25,6 +25,7 @@
 #include "API/btcomm.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h> 
 
 // Change this to match the ports your bots motors are connected to
 #define LEFT_MOTOR MOTOR_D
