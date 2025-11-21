@@ -37,6 +37,10 @@
 
 #define NOISE_VAR 5.0                   // Minimum amount of displacement considered NOT noise (in pixels).
 
+#define TACTIC_ATTACK 5
+#define TACTIC_DEFEND 6
+#define TACTIC_SELECT 4
+
 struct AI_data{
 	// This data structure is used to hold all data relevant to the state of the AI.
 	// This includes, of course, the current state, as well as the status of
@@ -168,10 +172,6 @@ typedef enum {
   PENALTY_KICKED, 
 
   STATE_SUCCESS, 
-
-  TACTIC_ATTACK, 
-  TACTIC_DEFEND, 
-  TACTIC_SELECT, 
 
   BALL_FLICK
 } State;
