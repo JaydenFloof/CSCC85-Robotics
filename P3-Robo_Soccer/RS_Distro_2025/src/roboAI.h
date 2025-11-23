@@ -171,7 +171,7 @@ typedef enum {
 
   TACTIC_ATTACK, 
   TACTIC_DEFEND, 
-  TACTIC_SELECT, 
+  TACTIC_CHOOSE, 
 
   BALL_FLICK
 } State;

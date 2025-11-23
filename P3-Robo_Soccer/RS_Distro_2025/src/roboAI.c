@@ -758,6 +758,7 @@ int setupAI(int mode, int own_col, struct RoboAI *ai)
   TRANSITIONS[104] = penalty_kick;
   TRANSITIONS[105] = penalty_end;
 
+  /* Penalty FSM. */
   TRANSITION_TABLE[101][PENALTY_TARGET_LOST]    = 101;  // If target not found, try again.
   TRANSITION_TABLE[101][PENALTY_TARGET_FOUND]   = 102;  // If target found, proceed to target.
   TRANSITION_TABLE[102][PENALTY_TARGET_REACHED] = 103;  // If target reached, align with goal.
@@ -776,6 +777,24 @@ int setupAI(int mode, int own_col, struct RoboAI *ai)
   TRANSITIONS[9]  = soccer_ram_goal;
   TRANSITIONS[10] = soccer_defend_goal;
   TRANSITIONS[11] = soccer_align_ball;
+
+  /* Soccer FSM. */
+  TRANSITION_TABLE[1][STATE_SUCCESS]  = 2;  // Corner-aligned                 -> Approach target
+  TRANSITION_TABLE[2][STATE_SUCCESS]  = 3;  // Target reached                 -> Attempt ball kick
+  TRANSITION_TABLE[3][STATE_SUCCESS]  = 4;  // Ball kicked OR Ball blocked    -> Choose tactic
+  TRANSITION_TABLE[4][TACTIC_ATTACK]  = 5;  // Attack tactic chosen           -> Attack
+  TRANSITION_TABLE[4][TACTIC_DEFEND]  = 6;  // Defend tactic chosen           -> Defend
+  TRANSITION_TABLE[5][TACTIC_CHOOSE]  = 4;  // Shouldn't attack               -> Choose tactic
+  TRANSITION_TABLE[5][BALL_FLICK]     = 7;  // Attack: Ball in flicking range -> Flick
+  TRANSITION_TABLE[5][STATE_SUCCESS]  = 8;  // Attack: Going well             -> Align to goal
+  TRANSITION_TABLE[6][TACTIC_CHOOSE]  = 4;  // Shouldn't defend               -> Choose tactic
+  TRANSITION_TABLE[6][BALL_FLICK]     = 7;  // Defend: Ball in flicking range -> Flick
+  TRANSITION_TABLE[6][STATE_SUCCESS]  = 10; // Defend: Going well             -> Defend goal for a while
+  TRANSITION_TABLE[7][STATE_SUCCESS]  = 4;  // Flick complete                 -> Choose tactic
+  TRANSITION_TABLE[8][STATE_SUCCESS]  = 9;  // Goal-aligned                   -> Ram into the goal
+  TRANSITION_TABLE[9][STATE_SUCCESS]  = 4;  // Goal ramming complete          -> Choose tactic
+  TRANSITION_TABLE[10][STATE_SUCCESS] = 11; // Defend goal complete           -> Align to ball
+  TRANSITION_TABLE[11][STATE_SUCCESS] = 9;  // Ball-aligned                   -> Ram into the goal
 
   TRANSITION_TABLE[1][STATE_SUCCESS] = 2;   // If aligned to corner, proceed to target. 
   TRANSITION_TABLE[2][STATE_SUCCESS] = 3;   // If target reached, kick ball. 
@@ -1345,7 +1364,7 @@ void soccer_tactic_attack(struct RoboAI *ai) {
   if (!soccer_should_attack(ai)) { // Select another tactic.
     enemy_threshold_reset();
 
-    ai->st.state = TRANSITION_TABLE[ai->st.state][TACTIC_SELECT];
+    ai->st.state = TRANSITION_TABLE[ai->st.state][TACTIC_CHOOSE];
     return;
   }
 
@@ -1380,7 +1399,7 @@ void soccer_tactic_defend(struct RoboAI *ai) {
   fprintf(stderr, "Initiating tactic DEFEND w/ state %d\n", ai->st.state);
 
   if (soccer_should_attack(ai)) { // Select another tactic.
-    ai->st.state = TRANSITION_TABLE[ai->st.state][TACTIC_SELECT];
+    ai->st.state = TRANSITION_TABLE[ai->st.state][TACTIC_CHOOSE];
     enemy_threshold_reset();
     return;
   }
