@@ -151,8 +151,11 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
  unsigned char R,G,B;			// Final colour at a destination pixel
  unsigned char *dst;			// Destination image - must be allocated here! 
  int x,y;				// Coordinates on destination image
- double fx,fy;				// Corresponding coordinates on source image
- double dx,dy;				// Fractional component of source image coordinates
+ double fx = 0;
+ double fy = 0;				// Corresponding coordinates on source image
+ double dx,dy;			// Fractional component of source image coordinates
+ int fyIntCounter = 0;
+ int fxIntCounter = 0;
  
  int floorfx;
  int floorfy;
@@ -162,9 +165,11 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
  double TMY;
  int xFloorOffset;
  int xCeilOffset;
- int yFloorOffset;
- int yCeilOffset;
- int ydist;
+ int yFloorOffset = 0;
+ int yCeilOffset = 0;
+ int ydist = 0;
+ int src_x3 = src_x * 3;
+ int dest_x3 = dest_x*3;
  unsigned char *p1;
  unsigned char *p2;
  unsigned char *p3;
@@ -177,19 +182,8 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
  step_x=(double)(src_x-1)/(double)(dest_x-1);
  step_y=(double)(src_y-1)/(double)(dest_y-1);
 
- for (y=0;y<dest_y;y++){	// Loop over destination image
-  fy=y*step_y;
-  floorfy = (int)fy;
-  ceilfy = (floorfy == fy) ? floorfy : floorfy + 1;
-  dy=fy-floorfy;
-  TMY = 1-dy;
-  yFloorOffset = 3*floorfy*src_x;
-  yCeilOffset = 3*ceilfy*src_x;
-  ydist = 3 * y * dest_x;
-  for (x=0;x<dest_x;x++)
-  {
-   
-  fx=x*step_x;
+ for (x=0;x<dest_x;x++){	// Loop over destination image
+
   floorfx = (int)fx;
   ceilfx = (floorfx == fx) ? floorfx : floorfx + 1;
   dx=fx-floorfx;
@@ -197,16 +191,17 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
   xFloorOffset = 3*floorfx;
   xCeilOffset = 3*ceilfx;
   
-
-  //  getPixel(src,floorfx,floorfy,src_x,&R1,&G1,&B1);	// get N1 colours
-  //  getPixel(src,ceilfx,floorfy,src_x,&R2,&G2,&B2);	// get N2 colours
-  //  getPixel(src,floorfx,ceilfy,src_x,&R3,&G3,&B3);	// get N3 colours
-  //  getPixel(src,ceilfx,ceilfy,src_x,&R4,&G4,&B4);	// get N4 colours
-
-  // p1 = src + 3*(floorfy*src_x + floorfx);
-  // p2 = src + 3*(floorfy*src_x + ceilfx);
-  // p3 = src + 3*(ceilfy*src_x + floorfx);
-  // p4 = src + 3*(ceilfy*src_x + ceilfx);
+  for (y=0;y<dest_y;y++)
+  {
+   
+  floorfy = (int)fy;
+  ceilfy = (floorfy == fy) ? floorfy : floorfy + 1;
+  //printf("Floorfy: %d, CeilFy: %d\n", floorfy, ceilfy);
+  dy=fy-floorfy;
+  TMY = 1-dy;
+  //yFloorOffset = floorfy*src_x3;
+  //yCeilOffset = ceilfy*src_x3;
+  
 
   p1 = src + yFloorOffset + xFloorOffset;
   p2 = src + yFloorOffset + xCeilOffset;
@@ -222,24 +217,27 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
   GT2=(dx*p4[1])+TMX*p3[1];
   BT2=(dx*p4[2])+TMX*p3[2];
 
-  //  RT1=(dx*R2)+(1-dx)*R1;
-  //  GT1=(dx*G2)+(1-dx)*G1;
-  //  BT1=(dx*B2)+(1-dx)*B1;
-  //  RT2=(dx*R4)+(1-dx)*R3;
-  //  GT2=(dx*G4)+(1-dx)*G3;
-  //  BT2=(dx*B4)+(1-dx)*B3;
-  
-   // Obtain final colour by interpolating between T1 and T2
-  //  R=(unsigned char)((dy*RT2)+(TMY*RT1));
-  //  G=(unsigned char)((dy*GT2)+(TMY*GT1));
-  //  B=(unsigned char)((dy*BT2)+(TMY*BT1));
   d = dst + 3 *x + ydist;
   d[0] = (unsigned char)(dy * RT2 + TMY * RT1);
   d[1] = (unsigned char)(dy * GT2 + TMY * GT1);
   d[2] = (unsigned char)(dy * BT2 + TMY * BT1);
    // Store the final colour
   //  setPixel(dst,x,y,dest_x,R,G,B);
+  fy+=step_y;
+  ydist += dest_x3;
+  if (fyIntCounter < int(fy)){
+    fyIntCounter++;
+    yFloorOffset+= src_x3;
+    yCeilOffset+= src_x3;
   }
+  }
+  //fx = 0;
+  fx+=step_x;
+  fy = 0;
+  ydist = 0;
+  fyIntCounter = 0;
+  yFloorOffset = 0;
+  yCeilOffset = 0;
   }
  return(dst);
 }
