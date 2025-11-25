@@ -21,22 +21,22 @@ Questions:
 0) On the same computer, and with no other applications open:
 
    - Run vanilla version, compiled as per the compile script (no compiler
-     optimization) and list: Vanilla (no compiler opt) FPS = 
+     optimization) and list: Vanilla (no compiler opt) FPS = 19.800
      
    - Run your optimized code, compiled without compiler optimization
-     and list: Your Code (no compiler opt) FPS =
+     and list: Your Code (no compiler opt) FPS = 52.267
 
    - Run vanilla code compiled with flag -O3 for compiler optimization
-     and list: Vanilla (compiler optimized) FPS =
+     and list: Vanilla (compiler optimized) FPS = 41.733
      
    - Run your optimized code, compiled with flag -O3
-     and list: Your Code (compiler optimized) FPS =
+     and list: Your Code (compiler optimized) FPS = 90.733
      
      What is the ratio of your code (compiler optimized) to vanilla
      with no compiler optimization?
      
      Ratio = Vanilla(no compiler opt) FPS / Your code(compiler optimized) FPS
-           =
+           = 19.800/90.733 = 0.218
      
 a) Look at the profiler output for vanilla_imageRescale(). Identify the
    lines that you think are un-necessary bottlenecks (i.e. lines whose
@@ -51,6 +51,9 @@ a) Look at the profiler output for vanilla_imageRescale(). Identify the
    For each line, explain why the line creates a bottleneck (in terms
    of what you know about CPU architecture). I want specific reasons
    why a line you listed takes a large chunk of CPU time.
+   ANSWER: The bottleneck Lines of code are mostly the lines that have some kind of
+   Arithmatic in them, the most expensive of which is multiplication. The function calls
+   Get Pixel and set pixel are also expensive.
 
 b) For each of the lines in a)
 
@@ -59,12 +62,24 @@ b) For each of the lines in a)
 
    Explain why your improvement should work (again, based on what you
    know about CPU architecture).
+   ANSWER: For the lines containing Arithmatic we did 2 things:
+   1: if it was an expression using x we took it out of the nested loop and put it in the 
+   x loop This causes less cpu instructions to be executed.
+   2: If The expression was a multiplication with a constant like with fx and fy,
+   instead of multiplying we add step_x/step_y as it is less expensive than multiplication
+   for a CPU Since binary addition is much cheaper than multiplication.
+   For the Function Calls: We simply bypassed the function itself and created pointers
+   directly, this only slightly increased effeciency.
 
 c) List any other optimizations you performed in your code and why they
    help increase speed
+   ANSWER: We also created variables for some common calculations for example 3*src_x 
+   and also 3*dest_x. 
 
 d) Is there any part of the vanilla code that could not be optimized
    at all? if so, which?
+   ANSWER: What could not be optimized is the allocation of dst and the initialization of 
+   step_x and step_y.
    
 e) Now run your code with cache sim on. Identify the lines that you see
    causing cache misses, and for each of these please list:
@@ -75,12 +90,18 @@ e) Now run your code with cache sim on. Identify the lines that you see
     
    Describe any strategy you can come up with that may help reduce these
    cache misses.
+   ANSWER: Getting the colours RT1, GT1 etc, causes caches misses. Loading the pi[j] 
+   values (for i = 1,2,3,4, j =0,1,2) into local variables first might cause less cache
+   misses when they are being accessed.
 
 f) Do you think you have achieved close to optimal performance on this
    code? (yes/no)
+   ANSWER: No
 
 g) If your answer to d) is no, what could you do to further increase
-   performance?
+   performance? 
+   ANSWER:Probably Reduce the amount of Cache misses is the main thing that we
+   could improve on the performance of the code.
 
 ______________________________________________________________________
 

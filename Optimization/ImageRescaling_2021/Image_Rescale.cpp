@@ -154,13 +154,15 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
  double fx = 0;
  double fy = 0;				// Corresponding coordinates on source image
  double dx,dy;			// Fractional component of source image coordinates
- int fyIntCounter = 0;
- int fxIntCounter = 0;
+ //int fyFloorIntCounter = 0;
+ //int fyCeilIntCounter = 0;
  
  int floorfx;
  int floorfy;
+ int newFloorfy = 0;
  int ceilfx;
  int ceilfy;
+ int newCeilfy = 0;
  double TMX;
  double TMY;
  int xFloorOffset;
@@ -194,8 +196,8 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
   for (y=0;y<dest_y;y++)
   {
    
-  floorfy = (int)fy;
-  ceilfy = (floorfy == fy) ? floorfy : floorfy + 1;
+  floorfy = newFloorfy;
+  ceilfy = newCeilfy;
   //printf("Floorfy: %d, CeilFy: %d\n", floorfy, ceilfy);
   dy=fy-floorfy;
   TMY = 1-dy;
@@ -225,18 +227,28 @@ unsigned char *fast_rescaleImage(unsigned char *src, int src_x, int src_y, int d
   //  setPixel(dst,x,y,dest_x,R,G,B);
   fy+=step_y;
   ydist += dest_x3;
-  if (fyIntCounter < int(fy)){
-    fyIntCounter++;
-    yFloorOffset+= src_x3;
-    yCeilOffset+= src_x3;
+  newFloorfy = (int)fy;
+  //yFloorOffset += (floorfy < newFloorfy) ? src_x3 : 0;
+  newCeilfy = (newFloorfy == fy) ? newFloorfy : newFloorfy + 1;
+  if ((floorfy < newFloorfy) && (ceilfy < newCeilfy)){
+    yFloorOffset += src_x3;
+    yCeilOffset += src_x3;
   }
+  else if (ceilfy < newCeilfy) {
+    yCeilOffset += src_x3;
   }
-  //fx = 0;
+  else if (floorfy < newFloorfy) {
+    yFloorOffset += src_x3;
+  }
+  //yCeilOffset += (ceilfy < newCeilfy) ? src_x3 : 0;
+
+  }
   fx+=step_x;
   fy = 0;
   ydist = 0;
-  fyIntCounter = 0;
   yFloorOffset = 0;
+  newFloorfy = 0;
+  newCeilfy = 0;
   yCeilOffset = 0;
   }
  return(dst);
