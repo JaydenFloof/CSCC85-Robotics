@@ -37,31 +37,31 @@ int laggy=0;
 
 #define PID_BUFSIZE 5  // Buffer size for a PID controller.
 #define STATE_AMT 300  // Amount of possible states.
-
 /* Penalty parameters. */
 #define PEN_RUN_UP_DIST 200.0  // Distance to begin approaching the ball in penalty mode.
-#define PEN_APPROACH_STOP 40.0 // Distance to stop approaching the ball in penalty mode.
-#define PEN_APPROACH_PWR -20   // Motor power when approaching target in penalty mode.
-#define PEN_TURN_PWR 20        // Turning power when approaching target in penalty mode.
+#define PEN_APPROACH_STOP 70.0 // Distance to stop approaching the ball in penalty mode.
+#define PEN_APPROACH_PWR 20   // Motor power when approaching target in penalty mode.
+#define PEN_TURN_PWR 20       // Turning power when approaching target in penalty mode.
 #define PEN_GOAL_ALIGN 0.25    // Maximum angle error allowed for goal alignment in penalty mode.
 #define PEN_KICK_FRAMES 7      // Amount of frames the robot drives forward for the penalty kick.
 #define OOB_SIZE 50.0          // Amount of pixels to consider the target position to be out-of-bounds.
+#define PEN_TURN_THRESHOLD 0.7 
 
 /* Soccer parameters. */
-#define SOC_RUN_UP_DIST 200.0   // Distance to begin approaching the ball in soccer mode.
+#define SOC_RUN_UP_DIST 250.0   // Distance to begin approaching the ball in soccer mode.
 #define SOC_APPROACH_PWR -60    // Motor power when approaching target in soccer mode.
 #define SOC_TURN_PWR 20         // Turning power when approaching target in soccer mode.
 #define SOC_CORNER_PWR -80      // Base power for corner alignment.
 #define SOC_KICK_PWR -90        // Base power for soccer kicks.
 #define SOC_KICK_FRAMES 6       // Amount of frames the robot drives forward for a soccer kick.
 #define SOC_KICK_OFS 15.0       // Amount of pixels to undershoot a soccer kick.
-#define SOC_APPROACH_STOP 100.0 // Distance to stop approaching the ball in soccer mode.
+#define SOC_APPROACH_STOP 850.0 // Distance to stop approaching the ball in soccer mode.
 #define SOC_CURVE_DIST 300.0    // Distance (in pixels) to curve around to on the side of the enemy robot.
-#define SOC_ATK_DIST 200.0      // Distance (in pixels) to consider the ball to be within "attacking" distance.
+#define SOC_ATK_DIST 100.0      // Distance (in pixels) to consider the ball to be within "attacking" distance.
 #define SOC_BACKOFF_PWR 70      // Base power for backoffs.
-#define SOC_STUCK_FRAMES 20     // Maximum amount of frames the allied robot shows little movement to be considered "stuck".
+#define SOC_STUCK_FRAMES 15     // Maximum amount of frames the allied robot shows little movement to be considered "stuck".
 #define SOC_BACKOFF_FRAMES 5    // Amount of frames the robot backs off (drives in reverse).
-#define SOC_BASE_ENEMY_DIST 400 // Base distance (in pixels) considered too close to the enemy robot.
+#define SOC_BASE_ENEMY_DIST 300 // Base distance (in pixels) considered too close to the enemy robot.
 #define SOC_BASE_BLOCKING 200   // Base distance (in pixels) considered to be blocking by the enemy robot.
 #define SOC_GOAL_ALIGN 0.2      // Maximum angle error allowed for goal alignment in soccer mode.
 #define SOC_BALL_ALIGN 0.2      // Maximum angle error allowed for ball alignment in soccer mode.
@@ -70,7 +70,7 @@ int laggy=0;
 #define SOC_FLICK_FRAMES 5      // Amount of frames to spend flicking the ball.
 
 /* Static Thresholds. */
-#define TURN_THRESHOLD 0.4            // Minimum angle error to rotate in place (without driving).
+#define TURN_THRESHOLD 0.1            // Minimum angle error to rotate in place (without driving).
 #define WORLD_ALIGN_THRESHOLD 1.5     // Maximum angle error allowed in world state alignment.
 #define HEADING_STABILITY_THRESHOLD 3 // Amount of frames with correct heading direction to be considered driving forward.
 #define SELF_MOTION_THRESHOLD 5       // Minimum amount of pixels the allied robot must move to be considered non-stationary.
@@ -652,7 +652,7 @@ void id_bot(struct RoboAI *ai, struct blob *blobs)
  
  track_agents(ai,blobs);		// Call the tracking function to find each agent
 
- BT_drive(LEFT_MOTOR, RIGHT_MOTOR, 30);			// Start forward motion to establish heading
+ BT_drive(LEFT_MOTOR, RIGHT_MOTOR, -30);			// Start forward motion to establish heading
                                                 // Will move for a few frames.
   
  if (ai->st.selfID==1&&ai->st.self!=NULL)
@@ -777,28 +777,41 @@ int setupAI(int mode, int own_col, struct RoboAI *ai)
   TRANSITIONS[9]  = soccer_ram_goal;
   TRANSITIONS[10] = soccer_defend_goal;
   TRANSITIONS[11] = soccer_align_ball;
+  TRANSITIONS[12] = stuck_backoff;
+
 
   /* Soccer FSM. */
-  TRANSITION_TABLE[1][STATE_SUCCESS]  = 2;  // Corner-aligned                 -> Approach target
+  TRANSITION_TABLE[1][STATE_SUCCESS]  = 2;  // Corner-aligned                 -> Acquire target
   TRANSITION_TABLE[2][STATE_SUCCESS]  = 3;  // Target reached                 -> Attempt ball kick
+    TRANSITION_TABLE[2][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
+
   TRANSITION_TABLE[3][STATE_SUCCESS]  = 4;  // Ball kicked OR Ball blocked    -> Choose tactic
   TRANSITION_TABLE[4][TACTIC_ATTACK]  = 5;  // Attack tactic chosen           -> Attack
   TRANSITION_TABLE[4][TACTIC_DEFEND]  = 6;  // Defend tactic chosen           -> Defend
   TRANSITION_TABLE[5][TACTIC_CHOOSE]  = 4;  // Shouldn't attack               -> Choose tactic
-  TRANSITION_TABLE[5][BALL_FLICK]     = 7;  // Attack: Ball in flicking range -> Flick
+  TRANSITION_TABLE[5][BALL_FLICK]     = 8;  // Attack: Ball in flicking range -> Flick
   TRANSITION_TABLE[5][STATE_SUCCESS]  = 8;  // Attack: Going well             -> Align to goal
+  TRANSITION_TABLE[5][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
   TRANSITION_TABLE[6][TACTIC_CHOOSE]  = 4;  // Shouldn't defend               -> Choose tactic
   TRANSITION_TABLE[6][BALL_FLICK]     = 7;  // Defend: Ball in flicking range -> Flick
   TRANSITION_TABLE[6][STATE_SUCCESS]  = 10; // Defend: Going well             -> Defend goal for a while
+  TRANSITION_TABLE[6][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
   TRANSITION_TABLE[7][STATE_SUCCESS]  = 4;  // Flick complete                 -> Choose tactic
+    TRANSITION_TABLE[7][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
+
   TRANSITION_TABLE[8][STATE_SUCCESS]  = 9;  // Goal-aligned                   -> Ram into the goal
+    TRANSITION_TABLE[8][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
+
   TRANSITION_TABLE[9][STATE_SUCCESS]  = 4;  // Goal ramming complete          -> Choose tactic
   TRANSITION_TABLE[10][STATE_SUCCESS] = 11; // Defend goal complete           -> Align to ball
+    TRANSITION_TABLE[10][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
   TRANSITION_TABLE[11][STATE_SUCCESS] = 9;  // Ball-aligned                   -> Ram into the goal
+    TRANSITION_TABLE[11][STUCK_BACKOFF]  = 12;  // bot stuck              -> Stuck backoff
+  TRANSITION_TABLE[12][STATE_SUCCESS] = 4;  // Stuck backoff             -> Choose tactic
 
-  TRANSITION_TABLE[1][STATE_SUCCESS] = 2;   // If aligned to corner, proceed to target. 
-  TRANSITION_TABLE[2][STATE_SUCCESS] = 3;   // If target reached, kick ball. 
-  TRANSITION_TABLE[3][STATE_SUCCESS] = 105; // If kick leads to a goal, halt motors and exit.
+  // TRANSITION_TABLE[1][STATE_SUCCESS] = 2;   // If aligned to corner, proceed to target. 
+  // TRANSITION_TABLE[2][STATE_SUCCESS] = 3;   // If target reached, kick ball. 
+  // TRANSITION_TABLE[3][STATE_SUCCESS] = 105; // If kick leads to a goal, halt motors and exit.
 
  fprintf(stderr,"Initialized!\n");
 
@@ -1030,6 +1043,7 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
 */
 void penalty_target_acquire(struct RoboAI *ai) {
   state_error_reset();
+  printf("\n\n -------------------------------------------\n Penalty target acquire\n");
 
   /* Compute vector from goal center to ball. */
   double vx = bpx - ENEMY_GOAL_X;
@@ -1066,9 +1080,9 @@ void penalty_target_approach(struct RoboAI *ai) {
 
   // TODO: Tune PID.
   PIDc pid = {
-    .p = 100.0, 
-    .d = 100.0, 
-    .i = 100.0
+    .p = 1, 
+    .d = 0.05, 
+    .i = 0.01
   };
 
   if (norm(target_x - spx, target_y - spy) <= PEN_APPROACH_STOP) {  // Target reached.
@@ -1089,7 +1103,7 @@ void penalty_target_approach(struct RoboAI *ai) {
       fprintf(stderr, "Ignoring specialized PID turn: Rotating without driving...\n");
 
       int turn_dir = (curr_err < 0) ? RIGHT : LEFT;
-      BT_turn(MOTOR_D, turn_dir * PEN_TURN_PWR, MOTOR_A, turn_dir * -(PEN_TURN_PWR));
+      BT_turn(MOTOR_D, turn_dir * -(PEN_TURN_PWR), MOTOR_A, turn_dir * (PEN_TURN_PWR));
     } else {  // Angle is close enough: Rotate while driving.
       double diff_err = curr_err - prev.err;
       double int_err = pid_int_err_update(curr_err);
@@ -1100,7 +1114,7 @@ void penalty_target_approach(struct RoboAI *ai) {
       /* -100.0 <= left_pwr, right_pwr <= 100.0 */
       double left_pwr  = fmin(100.0, fmax(-100.0, PEN_APPROACH_PWR - u));
       double right_pwr = fmin(100.0, fmax(-100.0, PEN_APPROACH_PWR + u));
-      BT_turn(MOTOR_D, left_pwr, MOTOR_A, right_pwr);
+      BT_turn(MOTOR_D, -left_pwr, MOTOR_A, -right_pwr);
     }
   }
 
@@ -1121,7 +1135,7 @@ void penalty_align_goal(struct RoboAI *ai) {
     ai->st.state = TRANSITION_TABLE[ai->st.state][PENALTY_GOAL_ALIGNED];
   } else {  // Turn in place.
     int turn_dir = (angle < 0) ? RIGHT : LEFT;
-    BT_turn(MOTOR_D, turn_dir * PEN_TURN_PWR, MOTOR_A, turn_dir * -PEN_TURN_PWR);
+    BT_turn(MOTOR_D, turn_dir * -(PEN_TURN_PWR), MOTOR_A, turn_dir * PEN_TURN_PWR);
   }
 
   return;
@@ -1165,16 +1179,22 @@ void penalty_end(struct RoboAI *ai) {
 */
 void soccer_align_corner(struct RoboAI *ai) {
   state_error_reset();
+  printf("\n\n -------------------------------------------\n Soccer align corner\n");
 
   /* Set target destination to half the distance between the robot and the ball. */
-  target_x = bpx + ((spx - bpx) / 2.0);
-  target_y = bpy;
+  target_x = bpx - spx;
+  target_y = bpy - spy;
+
+  fprintf(stderr, "Target position: (%lf, %lf)\n", target_x, target_y);
+  fprintf(stderr, "Self position: (%lf, %lf)\n", spx, spy);
+  fprintf(stderr, "ball position: (%lf, %lf) %lf, %lf\n", bpx, bpy, ENEMY_GOAL_X, ENEMY_GOAL_Y);
 
   /* Corner to align to. */
   double corner_x = 0.0;
   double corner_y = (spy < ENEMY_GOAL_Y) ? 1.0 : -1.0;
 
-  double angle = signed_angle(sdx, sdy, corner_x, corner_y);
+  double angle = signed_angle(sdx, sdy, target_x, target_y);
+  fprintf(stderr, "Signed angle: %lf\n", angle);
   if (soccer_start) {
     soccer_start = false;  // Set starting angle once.
 
@@ -1182,12 +1202,12 @@ void soccer_align_corner(struct RoboAI *ai) {
     fprintf(stderr, "Starting angle: %lf\n", starting_angle);
   }
 
-  int turn_pwr = fmax(17.0, abs(22.0 * angle));
+  int turn_pwr = fmax(20.0, abs(22.0 * angle));
   if (angle > TURN_THRESHOLD) {         // Counter-clockwise turn.
-    BT_turn(MOTOR_D, -turn_pwr, MOTOR_A, turn_pwr);
+    BT_turn(MOTOR_D, turn_pwr, MOTOR_A, -turn_pwr);
     return;
   } else if (angle < -TURN_THRESHOLD) { // Clockwise turn.
-    BT_turn(MOTOR_D, turn_pwr, MOTOR_A, -turn_pwr);
+    BT_turn(MOTOR_D, -turn_pwr, MOTOR_A, turn_pwr);
     return;
   }
 
@@ -1214,19 +1234,22 @@ bool soccer_target_acquire(struct RoboAI *ai) {
   /* Update target position. */
   target_x = bpx + (SOC_RUN_UP_DIST) * (vx / dist);
   target_y = bpy + (SOC_RUN_UP_DIST) * (vy / dist);
+
+  fprintf(stderr, "Target position: (%lf, %lf) and self position: (%lf, %lf)\n", target_x, target_y, spx, spy);
   
   /* Check that target position is within the bounds of the image. */
-  if (target_x <= OOB_SIZE || target_x >= (sx - OOB_SIZE) || 
-      target_y <= OOB_SIZE || target_y >= (sy - OOB_SIZE)) {
+  if (!((target_x <= OOB_SIZE || target_x >= (sx - OOB_SIZE) || 
+      target_y <= OOB_SIZE || target_y >= (sy - OOB_SIZE)))) {
     /* Ball is reachable -> Target the ball. */
     target_x = bpx;
     target_y = bpy;
     
-    fprintf(stderr, "Soccer target acquired: Ball reachable!\n");
+    fprintf(stderr, "Soccer target acquired: Ball reachable!\n\n");
+    ai->st.state = TRANSITION_TABLE[ai->st.state][STATE_SUCCESS];
 
     return true;
   }
-  fprintf(stderr, "error: soccer target (i.e., ball) not found\n");
+  fprintf(stderr, "error: soccer target (i.e., ball) not found\n\n");
 
   return false;
 }
@@ -1236,13 +1259,20 @@ bool soccer_target_acquire(struct RoboAI *ai) {
 */
 void soccer_target_approach(struct RoboAI *ai) {
   state_error_reset();
+  printf("\n\n -------------------------------------------\n Soccer target approach\n");
+    if (stuck_backoff(ai)) {  // Stuck: Back off.
+          ai->st.state = TRANSITION_TABLE[ai->st.state][STUCK_BACKOFF];
+    return;
+  }
 
   // TODO: Tune PID.
   PIDc pid = {
-    .p = 100.0, 
-    .d = 100.0, 
-    .i = 100.0
+    .p = 1, 
+    .d = 0.05, 
+    .i = 0.01
   };
+  printf("current distance to target: %f\n", norm(target_x - spx, target_y - spy));
+  fprintf(stderr, "Self position: (%lf, %lf)\n", spx, spy);
 
   if (norm(target_x - spx, target_y - spy) <= SOC_APPROACH_STOP) {
     fprintf(stderr, "Target reached: Aligning with goal...\n");
@@ -1264,9 +1294,9 @@ void soccer_target_approach(struct RoboAI *ai) {
     if (starting_angle > (PI/8.0) && starting_angle < (3.0*PI/8.0)) {
       fprintf(stderr, "Switching to 45deg PID...\n");
 
-      pid.p = 100.0;
-      pid.d = 100.0;
-      pid.i = 100.0;
+      pid.p = 1.0;
+      pid.d = 0.05;
+      pid.i = 0.01;
     }
 
     double u = pid_u(&pid, curr_err, diff_err, int_err);  // -PI <= u <= PI
@@ -1285,12 +1315,13 @@ void soccer_target_approach(struct RoboAI *ai) {
 */
 void soccer_kick(struct RoboAI *ai) {
   state_error_reset();
+  printf("\n\n -------------------------------------------\n Soccer kick\n");
 
   // TODO: Tune PID.
   PIDc pid = {
-    .p = 100.0, 
-    .d = 100.0, 
-    .i = 100.0
+       .p = 1, 
+    .d = 0.05, 
+    .i = 0.01
   };
 
   /* Set target to (slightly undershoot) the enemy goal. */
@@ -1344,6 +1375,7 @@ void soccer_kick(struct RoboAI *ai) {
   Sets the AI state to the appropriate tactic. 
 */
 void soccer_tactic_choose(struct RoboAI *ai) {
+  fprintf(stderr, "Choosing tactic with state %d\n", ai->st.state);
   State tactic = (soccer_should_attack(ai)) ? TACTIC_ATTACK : TACTIC_DEFEND;
   ai->st.state = TRANSITION_TABLE[ai->st.state][tactic];
 
@@ -1358,6 +1390,8 @@ void soccer_tactic_attack(struct RoboAI *ai) {
 
   if (stuck_backoff(ai)) {  // Can't attack while stuck -> Back-off.
     enemy_threshold_reset();
+              ai->st.state = TRANSITION_TABLE[ai->st.state][STUCK_BACKOFF];
+
     return;
   };
   
@@ -1406,6 +1440,8 @@ void soccer_tactic_defend(struct RoboAI *ai) {
 
   if (stuck_backoff(ai)) {  // Stuck -> Back-off and defend again.
     enemy_threshold_reset();
+              ai->st.state = TRANSITION_TABLE[ai->st.state][STUCK_BACKOFF];
+
     return;
   }
   
@@ -1453,6 +1489,7 @@ void soccer_tactic_defend(struct RoboAI *ai) {
   Defends the goal for a short time or until the ball moves. 
 */
 void soccer_defend_goal(struct RoboAI *ai) {
+  printf("\n\n -------------------------------------------\n Soccer defend goal\n");
   guard_frames++;
 
   /* Goal defense complete. */
@@ -1469,10 +1506,13 @@ void soccer_defend_goal(struct RoboAI *ai) {
 */
 void soccer_align_ball(struct RoboAI *ai) {
   if (stuck_backoff(ai)) {  // Stuck -> Stop alignment.
+              ai->st.state = TRANSITION_TABLE[ai->st.state][STUCK_BACKOFF];
+
     return;
   }
-
   state_error_reset();
+    printf("\n\n -------------------------------------------\n Soccer align ball\n");
+
 
   double angle = signed_angle(sdx, sdy, bpx - spx, bpy - spy);
   if (abs(angle) <= SOC_BALL_ALIGN) { // Ball aligned.
@@ -1493,10 +1533,14 @@ void soccer_align_ball(struct RoboAI *ai) {
 */
 void soccer_align_goal(struct RoboAI *ai) {
   if (stuck_backoff(ai)) {  // Stuck -> Stop alignment.
+              ai->st.state = TRANSITION_TABLE[ai->st.state][STUCK_BACKOFF];
+
     return;
   }
 
   state_error_reset();
+  printf("\n\n -------------------------------------------\n Soccer align goal\n");
+
 
   double angle = signed_angle(sdx, sdy, ENEMY_GOAL_X - spx, ENEMY_GOAL_Y - spy);
   if (abs(angle) <= SOC_GOAL_ALIGN) { // Goal aligned.
@@ -1506,7 +1550,7 @@ void soccer_align_goal(struct RoboAI *ai) {
     ai->st.state = TRANSITION_TABLE[ai->st.state][STATE_SUCCESS];
   } else {  // Turn in place.
     int turn_dir = (angle < 0) ? RIGHT : LEFT;
-    BT_turn(MOTOR_D, turn_dir * SOC_TURN_PWR, MOTOR_A, turn_dir * -SOC_TURN_PWR);
+    BT_turn(MOTOR_D, turn_dir * -SOC_TURN_PWR, MOTOR_A, turn_dir * SOC_TURN_PWR);
   }
 
   return;
@@ -1528,6 +1572,8 @@ bool soccer_should_attack(struct RoboAI *ai) {
 */
 void soccer_ram_goal(struct RoboAI *ai) {
   state_error_reset();
+
+  printf("\n\n -------------------------------------------\n Soccer ram goal\n");
 
   /* Ram into the enemy goal! */
   target_x = ENEMY_GOAL_X;
@@ -1554,6 +1600,8 @@ void soccer_ram_goal(struct RoboAI *ai) {
   by the enemy robot and curves around them, and returns false otherwise.
 */
 bool soccer_curve_around(struct RoboAI *ai) {
+  printf("\n\n -------------------------------------------\n Soccer curve around\n");
+
   /* Compute distance from ally robot to enemy robot. */
   double dx_e = opx - spx;
   double dy_e = opy - spy;
@@ -1604,9 +1652,12 @@ bool soccer_curve_around(struct RoboAI *ai) {
 */
 void soccer_ball_flick(struct RoboAI *ai) {
   if (stuck_backoff(ai)) {  // Stuck -> Abort ball flick.
+              ai->st.state = TRANSITION_TABLE[ai->st.state][STUCK_BACKOFF];
+
     return;
   }
   
+  printf("\n\n -------------------------------------------\n Soccer ball flick\n");
   if (flick_frames > SOC_FLICK_FRAMES) {  // Ball flick done.
     flick_frames = 0;
     BT_all_stop(1); // Stopping is necessary for the flick.
@@ -1615,7 +1666,7 @@ void soccer_ball_flick(struct RoboAI *ai) {
 
     /* If the ball didn't move, nudge forward slightly. */
     if (!ball_in_motion(ai)) {
-      BT_turn(MOTOR_D, 70, MOTOR_A, 70);
+      BT_turn(MOTOR_D, -70, MOTOR_A, -70);
     }
     
     return;
@@ -1631,9 +1682,9 @@ void soccer_ball_flick(struct RoboAI *ai) {
 
   /* Flick in the direction of the enemy goal. */
   if ((spy > bpy) == (ENEMY_GOAL_X == 0)) {
-    BT_turn(MOTOR_D, pwr, MOTOR_A, -pwr); // Flick counter-clockwise.
+    BT_turn(MOTOR_D, -pwr, MOTOR_A, pwr); // Flick counter-clockwise.
   } else {
-    BT_turn(MOTOR_D, -pwr, MOTOR_A, pwr); // Flick clockwise.
+    BT_turn(MOTOR_D, pwr, MOTOR_A, -pwr); // Flick clockwise.
   }
 
   flick_frames++; // We can be sure we flicked here.
@@ -1651,10 +1702,12 @@ void soccer_ball_flick(struct RoboAI *ai) {
 bool target_approach(struct RoboAI *ai, Mode mode, double target_threshold) {
   // TODO: Tune PID.
   PIDc pid = {
-    .p = 100.0, 
-    .d = 100.0, 
-    .i = 100.0
+    .p = 1, 
+    .d = 0.05, 
+    .i = 0.01
   };
+
+  printf("\n\n -------------------------------------------\n Target approach\n");
 
   if (norm(target_x - spx, target_y - spy) <= target_threshold) {
     fprintf(stderr, "Target reached!\n");
@@ -1711,6 +1764,7 @@ bool ball_in_motion(struct RoboAI *ai) {
 bool stuck_backoff(struct RoboAI *ai) {
   /* Allied robot is believed to be stuck. */
   if (stuck_frames > SOC_STUCK_FRAMES) {
+      printf("\n\n -------------------------------------------\n Soccer stuck backoff\n");
     /* Backing-off complete. */
     if (backoff_frames > SOC_BACKOFF_FRAMES) {
       BT_all_stop(1);
@@ -1718,6 +1772,8 @@ bool stuck_backoff(struct RoboAI *ai) {
       backoff_frames = 0;
       stuck_frames   = 0;
 
+      ai->st.state = TRANSITION_TABLE[ai->st.state][STATE_SUCCESS];
+      printf("Back-off complete: Resuming normal operation...\n\n\n");
       return false;
     }
 
@@ -1734,7 +1790,7 @@ bool stuck_backoff(struct RoboAI *ai) {
   } else {
     stuck_frames = 0;
   }
-
+  printf("hearee???\n----------------------------------------------------\n\n\n");
   return false;
 }
 

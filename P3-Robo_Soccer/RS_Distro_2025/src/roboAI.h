@@ -171,9 +171,10 @@ typedef enum {
 
   TACTIC_ATTACK, 
   TACTIC_DEFEND, 
-  TACTIC_CHOOSE, 
+  TACTIC_CHOOSE,
 
-  BALL_FLICK
+  BALL_FLICK,
+  STUCK_BACKOFF
 } State;
 
 /* Turn direction. */
