@@ -34,6 +34,11 @@ extern int sy;
 int laggy=0;
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <math.h>
+
+
+
 
 #define PID_BUFSIZE 5  // Buffer size for a PID controller.
 #define STATE_AMT 300  // Amount of possible states.
@@ -81,6 +86,7 @@ int laggy=0;
 #define DEF_APPROACH_THRESHOLD 100.0  // Distance to target position when defending.
 #define DEF_STOP_THRESHOLD 300        // Minimum distance to ball position to stop defending and go for the ball.
 #define RAM_APPROACH_THRESHOLD 250.0  // Minimum distance to ball position to begin ramming it into the goal.
+#define OOB_THRESHHOLD 40             // Threshold fopr being considered to approach OOB
 
 /* Dynamic Thresholds. */
 int enemy_dist_threshold     = SOC_BASE_ENEMY_DIST; // Distance (in pixels) considered too close to the enemy robot.
@@ -1774,6 +1780,9 @@ bool stuck_backoff(struct RoboAI *ai) {
 
       ai->st.state = TRANSITION_TABLE[ai->st.state][STATE_SUCCESS];
       printf("Back-off complete: Resuming normal operation...\n\n\n");
+      int honkTone[50][3];
+      wav_to_ev3_tones("honk.wav", honkTone);
+      BT_play_tone_sequence(honkTone);
       return false;
     }
 
@@ -1785,7 +1794,8 @@ bool stuck_backoff(struct RoboAI *ai) {
   }
 
   /* Increment the number of recorded frames with little movement. */
-  if (abs(spx - prev.spx) < SELF_MOTION_THRESHOLD && abs(spy - prev.spy) < SELF_MOTION_THRESHOLD) {
+  if ((abs(spx - prev.spx) < SELF_MOTION_THRESHOLD && abs(spy - prev.spy) < SELF_MOTION_THRESHOLD) 
+  || (fabs(sx - spx) < OOB_THRESHHOLD || fabs(spx) < OOB_THRESHHOLD || fabs(sy - spy) < OOB_THRESHHOLD || fabs(spy) < OOB_THRESHHOLD)) {
     stuck_frames++;
   } else {
     stuck_frames = 0;
@@ -1941,4 +1951,158 @@ double norm(double x, double y) {
 */
 double signed_angle(double x0, double y0, double x1, double y1) {
   return atan2(x0*y1 - x1*y0, x0*x1 + y0*y1);
+}
+
+
+
+//TONE FUNCTIONS: -----------------------------------------
+#define MAX_TONES 50
+#define FRAME_MS 50     // analyze audio in 50ms windows
+#define MIN_FREQ 20
+#define MAX_FREQ 20000
+#define M_PI 3.14159265358979323846
+
+// ---------------- WAV HEADER ----------------
+#pragma pack(push, 1)
+#pragma pack(pop)
+
+
+//SIMPLE FFT
+void fft(double *real, double *imag, int n) {
+    int i, j, k, m;
+    int m_max, step;
+    double theta, wtemp, wpr, wpi, wr, wi, tempr, tempi;
+
+    // bit reversal
+    j = 0;
+    for (i = 0; i < n; i++) {
+        if (j > i) {
+            double tmp_r = real[i];
+            double tmp_i = imag[i];
+            real[i] = real[j]; imag[i] = imag[j];
+            real[j] = tmp_r;   imag[j] = tmp_i;
+        }
+        m = n >> 1;
+        while (m >= 1 && j >= m) {
+            j -= m;
+            m >>= 1;
+        }
+        j += m;
+    }
+
+    // Danielson-Lanczos
+    for (m_max = 1; n > m_max; m_max <<= 1) {
+        step = m_max << 1;
+        theta = -M_PI / m_max;
+        wtemp = sin(0.5 * theta);
+        wpr = -2.0 * wtemp * wtemp;
+        wpi = sin(theta);
+        wr = 1.0; wi = 0.0;
+
+        for (m = 0; m < m_max; m++) {
+            for (i = m; i < n; i += step) {
+                j = i + m_max;
+                tempr = wr * real[j] - wi * imag[j];
+                tempi = wr * imag[j] + wi * real[j];
+
+                real[j] = real[i] - tempr;
+                imag[j] = imag[i] - tempi;
+                real[i] += tempr;
+                imag[i] += tempi;
+            }
+            wtemp = wr;
+            wr = wtemp * wpr - wi * wpi + wr;
+            wi = wi * wpr + wtemp * wpi + wi;
+        }
+    }
+}
+
+
+//PITCH DETECTION
+// find strongest frequency peak in FFT
+double get_dominant_frequency(const int16_t *pcm, int samples, int sample_rate) {
+    int n = 1;
+    while (n < samples) n <<= 1;  // next power of 2
+
+    double *real = calloc(n, sizeof(double));
+    double *imag = calloc(n, sizeof(double));
+
+    for (int i = 0; i < samples; i++)
+        real[i] = pcm[i];
+
+    fft(real, imag, n);
+
+    double max_mag = 0.0;
+    int max_i = 0;
+
+    int half = n / 2;
+    for (int i = 1; i < half; i++) {
+        double mag = real[i]*real[i] + imag[i]*imag[i];
+        if (mag > max_mag) {
+            max_mag = mag;
+            max_i = i;
+        }
+    }
+
+    free(real);
+    free(imag);
+
+    double freq = (double)max_i * sample_rate / n;
+    if (freq < MIN_FREQ || freq > MAX_FREQ) return 0; // ignore noise
+    return freq;
+}
+
+
+//MAIN CONVERSION FUNCTION
+int wav_to_ev3_tones(const char *filename, int tones[50][3]) {
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) {
+        printf("Could not open WAV file\n");
+        return -1;
+    }
+
+    WAVHeader header;
+    fread(&header, sizeof(WAVHeader), 1, fp);
+
+    if (header.channels != 1 || header.bits_per_sample != 16) {
+        printf("Only 16-bit mono WAV supported\n");
+        fclose(fp);
+        return -1;
+    }
+
+    int total_samples = header.data_size / 2;
+    int16_t *pcm = malloc(header.data_size);
+    fread(pcm, sizeof(int16_t), total_samples, fp);
+    fclose(fp);
+
+    int frame_samples = (header.sample_rate * FRAME_MS) / 1000;
+
+    int tone_count = 0;
+    for (int start = 0; start + frame_samples < total_samples && tone_count < MAX_TONES; start += frame_samples) {
+
+        double freq = get_dominant_frequency(&pcm[start], frame_samples, header.sample_rate);
+
+        if (freq == 0) continue;
+
+        // compute volume as average magnitude mapped to 0–63
+        double sum = 0;
+        for (int i = 0; i < frame_samples; i++)
+            sum += fabs(pcm[start + i]);
+        double avg = sum / frame_samples;
+        int volume = (int)(avg / 32768.0 * 63.0);
+        if (volume > 63) volume = 63;
+
+        tones[tone_count][0] = (int)freq;
+        tones[tone_count][1] = FRAME_MS;
+        tones[tone_count][2] = volume;
+        tone_count++;
+    }
+
+    // end marker
+    for (int i = tone_count; i < MAX_TONES; i++) {
+        tones[i][0] = tones[i][1] = tones[i][2] = -1;
+    }
+
+    free(pcm);
+    return 0;
 }
