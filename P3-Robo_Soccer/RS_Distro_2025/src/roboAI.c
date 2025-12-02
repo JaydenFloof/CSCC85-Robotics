@@ -2091,9 +2091,17 @@ int wav_to_ev3_tones(const char *filename, int tones[50][3]) {
         double avg = sum / frame_samples;
         int volume = (int)(avg / 32768.0 * 63.0);
         if (volume > 63) volume = 63;
+        if (volume < 0) volume = 0;
 
+        if (freq < 20.0) freq = 20.0;
+        if (freq > 20000.0) freq = 20000.0;
         tones[tone_count][0] = (int)freq;
-        tones[tone_count][1] = FRAME_MS;
+
+        int duration_ms = FRAME_MS;
+        if (duration_ms < 1) duration_ms = 1;
+        if (duration_ms > 5000) duration_ms = 5000;
+        tones[tone_count][1] = duration_ms;
+
         tones[tone_count][2] = volume;
         tone_count++;
     }
